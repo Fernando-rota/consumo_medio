@@ -76,29 +76,19 @@ def main():
             base1 = base1[(base1['data'] >= start_date) & (base1['data'] <= end_date)]
             base2 = base2[(base2['data'] >= start_date) & (base2['data'] <= end_date)]
 
-            # FILTRO por tipo de combustível — somente base externa
-            combustiveis_externo = []
-            if 'COMBUSTÍVEL' in base1.columns:
-                combustiveis_externo = base1['COMBUSTÍVEL'].dropna().unique().tolist()
-            filtro_combustivel = None
-            if combustiveis_externo:
-                filtro_combustivel = st.selectbox(
-                    "Filtrar por Tipo de Combustível (Base Externa)", 
-                    ["Todos"] + sorted(combustiveis_externo)
+            # FILTRO por Descrição do Abastecimento (tipo de combustível) — base externa
+            descricao_abastecimento = []
+            if 'DESCRIÇÃO DO ABASTECIMENTO' in base1.columns:
+                descricao_abastecimento = base1['DESCRIÇÃO DO ABASTECIMENTO'].dropna().unique().tolist()
+
+            filtro_descricao = None
+            if descricao_abastecimento:
+                filtro_descricao = st.selectbox(
+                    "Filtrar por Descrição do Abastecimento (Base Externa)",
+                    ["Todos"] + sorted(descricao_abastecimento)
                 )
-                if filtro_combustivel and filtro_combustivel != "Todos":
-                    base1 = base1[base1['COMBUSTÍVEL'] == filtro_combustivel]
-
-            # FILTRO por veículos (placas) — base externa e interna juntas
-            placas_externo = base1['placa'].unique().tolist()
-            placas_interno = base2['placa'].unique().tolist()
-            placas = sorted(list(set(placas_externo + placas_interno)))
-
-            filtro_placa = st.multiselect("Filtrar por Veículo(s) (placa)", placas, default=placas)
-
-            if filtro_placa:
-                base1 = base1[base1['placa'].isin(filtro_placa)]
-                base2 = base2[base2['placa'].isin(filtro_placa)]
+                if filtro_descricao and filtro_descricao != "Todos":
+                    base1 = base1[base1['DESCRIÇÃO DO ABASTECIMENTO'] == filtro_descricao]
 
             # KPIs gerais
             litros_ext = base1['litros'].sum()
