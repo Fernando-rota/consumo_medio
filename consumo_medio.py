@@ -64,7 +64,7 @@ def main():
             base2['litros'] = pd.to_numeric(base2['Quantidade de litros'], errors='coerce')
             base2['km_atual'] = pd.to_numeric(base2['KM Atual'], errors='coerce')
 
-            # Seleção intervalo de datas
+            # Datas para filtro
             start_date = pd.to_datetime(st.date_input('Data inicial', value=pd.to_datetime('2025-01-01')))
             end_date = pd.to_datetime(st.date_input('Data final', value=pd.to_datetime('2025-12-31')))
 
@@ -73,49 +73,19 @@ def main():
                 return
 
             # Filtrar por intervalo
-            base1 = base1[(base1['data'] >= start_date) & (base1['data'] <= end_date)]
-            base2 = base2[(base2['data'] >= start_date) & (base2['data'] <= end_date)]
-
-            # FILTRO por tipo de combustível (se coluna existir)
-            combustiveis_externo = []
-            if 'COMBUSTÍVEL' in base1.columns:
-                combustiveis_externo = base1['COMBUSTÍVEL'].dropna().unique().tolist()
-            combustiveis_interno = []
-            if 'Tipo' in base2.columns:
-                combustiveis_interno = base2['Tipo'].dropna().unique().tolist()
-
-            combustiveis = sorted(list(set(combustiveis_externo + combustiveis_interno)))
-            filtro_combustivel = None
-            if combustiveis:
-                filtro_combustivel = st.selectbox("Filtrar por Tipo de Combustível (ou deixe em branco para todos)", ["Todos"] + combustiveis)
-
-                if filtro_combustivel and filtro_combustivel != "Todos":
-                    if 'COMBUSTÍVEL' in base1.columns:
-                        base1 = base1[base1['COMBUSTÍVEL'] == filtro_combustivel]
-                    if 'Tipo' in base2.columns:
-                        base2 = base2[base2['Tipo'] == filtro_combustivel]
-
-            # FILTRO por veículos (placas)
-            placas_externo = base1['placa'].unique().tolist()
-            placas_interno = base2['placa'].unique().tolist()
-            placas = sorted(list(set(placas_externo + placas_interno)))
-
-            filtro_placa = st.multiselect("Filtrar por Veículo(s) (placa)", placas, default=placas)
-
-            if filtro_placa:
-                base1 = base1[base1['placa'].isin(filtro_placa)]
-                base2 = base2[base2['placa'].isin(filtro_placa)]
+            base1_filt = base1[(base1['data'] >= start_date) & (base1['data'] <= end_date)]
+            base2_filt = base2[(base2['data'] >= start_date) & (base2['data'] <= end_date)]
 
             # KPIs gerais
-            litros_ext = base1['litros'].sum()
-            litros_int = base2['litros'].sum()
+            litros_ext = base1_filt['litros'].sum()
+            litros_int = base2_filt['litros'].sum()
             total_litros = litros_ext + litros_int
             perc_ext = (litros_ext / total_litros) * 100 if total_litros > 0 else 0
             perc_int = (litros_int / total_litros) * 100 if total_litros > 0 else 0
 
             valor_ext = 0
-            if 'CUSTO TOTAL' in base1.columns:
-                valor_ext = base1['CUSTO TOTAL'].apply(tratar_valor).sum()
+            if 'CUSTO TOTAL' in base1_filt.columns:
+                valor_ext = base1_filt['CUSTO TOTAL'].apply(tratar_valor).sum()
 
             st.subheader(f'Resumo do Abastecimento ({start_date.date()} a {end_date.date()})')
 
@@ -128,26 +98,24 @@ def main():
                 st.metric('Litros abastecidos internamente', f'{litros_int:,.2f} L')
                 st.metric('% abastecimento interno', f'{perc_int:.1f}%')
 
-            # Top 10 veículos que mais abasteceram externamente
+            # Veículos que mais abasteceram externamente
             st.subheader('Top 10 veículos com mais litros abastecidos (Externo)')
             top_ext = (
-                base1.groupby('placa')['litros']
+                base1_filt.groupby('placa')['litros']
                 .sum()
-                .sort_values(ascending=False)
+                .reset_index()
+                .sort_values(by='litros', ascending=False)
                 .head(10)
             )
+            st.dataframe(top_ext.style.format({'litros': '{:,.2f}'}))
 
-            # Mostrar gráfico antes da tabela
-            st.bar_chart(top_ext.to_frame(name='Litros'))
+            # Gráfico de barras (sem matplotlib)
+            st.bar_chart(top_ext.set_index('placa'))
 
-            st.dataframe(
-                top_ext.reset_index().rename(columns={'litros': 'Litros'}).style.format({'Litros': '{:,.2f}'})
-            )
-
-            # Consumo médio por veículo (interno + externo)
+            # Consumo médio por veículo
             df_combined = pd.concat([
-                base1[['placa', 'data', 'km_atual', 'litros']],
-                base2[['placa', 'data', 'km_atual', 'litros']]
+                base1_filt[['placa', 'data', 'km_atual', 'litros']],
+                base2_filt[['placa', 'data', 'km_atual', 'litros']]
             ], ignore_index=True)
 
             df_combined = df_combined.sort_values(['placa', 'data', 'km_atual']).reset_index(drop=True)
@@ -159,14 +127,17 @@ def main():
 
             consumo_medio = df_clean.groupby('placa')['consumo_por_km'].mean().reset_index()
             consumo_medio['km_por_litro'] = 1 / consumo_medio['consumo_por_km']
-            consumo_medio = consumo_medio[['placa', 'km_por_litro']].sort_values('km_por_litro', ascending=False)
 
             st.subheader('Consumo Médio por Veículo (Km/L)')
+            st.dataframe(
+                consumo_medio[['placa', 'km_por_litro']]
+                .sort_values('km_por_litro', ascending=False)
+                .style.format({'km_por_litro': '{:.2f}'})
+            )
 
-            # Gráfico antes da tabela
-            st.bar_chart(consumo_medio.set_index('placa'))
-
-            st.dataframe(consumo_medio.style.format({'km_por_litro': '{:.2f}'}))
+            st.bar_chart(
+                consumo_medio.set_index('placa')['km_por_litro'].sort_values(ascending=False)
+            )
 
         else:
             st.warning('Não foi possível processar uma das bases. Verifique os dados.')
