@@ -49,22 +49,20 @@ def main():
         base2 = carregar_base(uploaded_base2, 'Base 2 (Interno)')
 
         if base1 is not None and base2 is not None:
-            # Converter colunas de data
+            # Datas e limpeza
             base1['data'] = pd.to_datetime(base1['DATA'], dayfirst=True, errors='coerce')
             base2['data'] = pd.to_datetime(base2['Data'], dayfirst=True, errors='coerce')
 
-            # Padronizar placas
             base1['placa'] = base1['PLACA'].astype(str).str.replace(' ', '').str.upper()
             base2['placa'] = base2['Placa'].astype(str).str.replace(' ', '').str.upper()
 
-            # Tratar litros e KM
             base1['litros'] = base1['CONSUMO'].apply(tratar_litros)
             base1['km_atual'] = pd.to_numeric(base1['KM ATUAL'], errors='coerce')
 
             base2['litros'] = pd.to_numeric(base2['Quantidade de litros'], errors='coerce')
             base2['km_atual'] = pd.to_numeric(base2['KM Atual'], errors='coerce')
 
-            # Datas para filtro
+            # Filtro de data
             start_date = pd.to_datetime(st.date_input('Data inicial', value=pd.to_datetime('2025-01-01')))
             end_date = pd.to_datetime(st.date_input('Data final', value=pd.to_datetime('2025-12-31')))
 
@@ -72,11 +70,10 @@ def main():
                 st.error("Data inicial deve ser menor ou igual à data final.")
                 return
 
-            # Filtrar por intervalo
             base1_filt = base1[(base1['data'] >= start_date) & (base1['data'] <= end_date)]
             base2_filt = base2[(base2['data'] >= start_date) & (base2['data'] <= end_date)]
 
-            # KPIs gerais
+            # KPIs
             litros_ext = base1_filt['litros'].sum()
             litros_int = base2_filt['litros'].sum()
             total_litros = litros_ext + litros_int
@@ -89,17 +86,18 @@ def main():
 
             st.subheader(f'Resumo do Abastecimento ({start_date.date()} a {end_date.date()})')
 
-            c1, c2 = st.columns(2)
-            with c1:
+            col1, col2 = st.columns(2)
+            with col1:
                 st.metric('Litros abastecidos externamente', f'{litros_ext:,.2f} L')
                 st.metric('Valor gasto externo', f'R$ {valor_ext:,.2f}')
                 st.metric('% abastecimento externo', f'{perc_ext:.1f}%')
-            with c2:
+            with col2:
                 st.metric('Litros abastecidos internamente', f'{litros_int:,.2f} L')
                 st.metric('% abastecimento interno', f'{perc_int:.1f}%')
 
-            # Veículos que mais abasteceram externamente
-            st.subheader('Top 10 veículos com mais litros abastecidos (Externo)')
+            # 🔽 Top veículos que mais abasteceram externamente
+            st.subheader('Top 10 veículos – Litros abastecidos externamente')
+
             top_ext = (
                 base1_filt.groupby('placa')['litros']
                 .sum()
@@ -107,12 +105,11 @@ def main():
                 .sort_values(by='litros', ascending=False)
                 .head(10)
             )
-            st.dataframe(top_ext.style.format({'litros': '{:,.2f}'}))
 
-            # Gráfico de barras (sem matplotlib)
-            st.bar_chart(top_ext.set_index('placa'))
+            st.bar_chart(top_ext.set_index('placa')['litros'])  # gráfico primeiro
+            st.dataframe(top_ext.style.format({'litros': '{:,.2f}'}))  # depois a tabela
 
-            # Consumo médio por veículo
+            # 🔽 Consumo médio
             df_combined = pd.concat([
                 base1_filt[['placa', 'data', 'km_atual', 'litros']],
                 base2_filt[['placa', 'data', 'km_atual', 'litros']]
@@ -128,19 +125,15 @@ def main():
             consumo_medio = df_clean.groupby('placa')['consumo_por_km'].mean().reset_index()
             consumo_medio['km_por_litro'] = 1 / consumo_medio['consumo_por_km']
 
-            st.subheader('Consumo Médio por Veículo (Km/L)')
-            st.dataframe(
-                consumo_medio[['placa', 'km_por_litro']]
-                .sort_values('km_por_litro', ascending=False)
-                .style.format({'km_por_litro': '{:.2f}'})
-            )
+            consumo_sorted = consumo_medio[['placa', 'km_por_litro']].sort_values('km_por_litro', ascending=False)
 
-            st.bar_chart(
-                consumo_medio.set_index('placa')['km_por_litro'].sort_values(ascending=False)
-            )
+            st.subheader('Consumo Médio por Veículo (Km por Litro)')
+
+            st.bar_chart(consumo_sorted.set_index('placa'))  # gráfico primeiro
+            st.dataframe(consumo_sorted.style.format({'km_por_litro': '{:.2f}'}))  # depois a tabela
 
         else:
-            st.warning('Não foi possível processar uma das bases. Verifique os dados.')
+            st.warning('Não foi possível processar uma das bases.')
 
     else:
         st.info('Envie as duas bases (.csv ou .xlsx) para gerar o relatório.')
