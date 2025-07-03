@@ -1,23 +1,9 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title='Relatório de Abastecimento com Filtro de Ano', layout='wide')
+st.set_page_config(page_title='Relatório de Abastecimento Interno x Externo', layout='wide')
 
-def carregar_base(uploaded_file, tipo_base):
-    try:
-        if uploaded_file.name.lower().endswith('.csv'):
-            df = pd.read_csv(uploaded_file, sep=None, engine='python')
-        elif uploaded_file.name.lower().endswith(('.xls', '.xlsx')):
-            import openpyxl
-            df = pd.read_excel(uploaded_file, engine='openpyxl')
-        else:
-            st.warning(f"Formato de arquivo não suportado para {tipo_base}. Use .csv ou .xlsx.")
-            return None
-        return df
-    except Exception as e:
-        st.error(f'Erro ao carregar {tipo_base}: {e}')
-        return None
-
+# Utilitário para tratar valores em reais
 def tratar_valor(valor_str):
     try:
         valor = str(valor_str).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
@@ -25,114 +11,122 @@ def tratar_valor(valor_str):
     except:
         return None
 
-def detectar_coluna_data(df):
-    for col in df.columns:
-        if 'data' in col.lower():
-            return col
-    return None
-
-def aplicar_filtro_ano(df, ano):
-    col_data = detectar_coluna_data(df)
-    if col_data:
-        df[col_data] = pd.to_datetime(df[col_data], dayfirst=True, errors='coerce')
-        return df[df[col_data].dt.year == ano]
-    else:
-        return pd.DataFrame()  # retorna vazio se não achar coluna de data
-
+# Carregar e tratar base externa
 def calcular_externo(df):
-    litros = pd.to_numeric(df.get('CONSUMO', None), errors='coerce')
+    # Corrigir vírgulas e converter consumo
+    if 'CONSUMO' in df.columns:
+        litros = df['CONSUMO'].astype(str).str.replace(',', '.').str.replace(' ', '')
+        litros = pd.to_numeric(litros, errors='coerce')
+    else:
+        litros = pd.Series([0] * len(df))
+
+    # Tratar valores
     if 'C/ DESC' in df.columns:
         valor = df['C/ DESC'].apply(tratar_valor)
     elif 'CUSTO TOTAL' in df.columns:
         valor = df['CUSTO TOTAL'].apply(tratar_valor)
     else:
-        valor = pd.Series([0]*len(df))
-    return litros.sum(), valor.sum()
+        valor = pd.Series([0] * len(df))
 
+    df['litros'] = litros
+    df['valor'] = valor
+    return df
+
+# Carregar e tratar base interna
 def calcular_interno(df):
+    df = df.rename(columns=lambda x: x.strip())
     if 'Quantidade de litros' in df.columns:
-        return pd.to_numeric(df['Quantidade de litros'], errors='coerce').sum()
-    return 0
+        df['litros'] = pd.to_numeric(df['Quantidade de litros'], errors='coerce')
+    else:
+        df['litros'] = 0
+    return df
 
-def calcular_consumo_medio(base1, base2):
-    df1 = base1.rename(columns={
-        'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'CONSUMO': 'litros'
-    })
-    df2 = base2.rename(columns={
-        'Placa': 'placa', 'Data': 'data', 'KM Atual': 'km_atual', 'Quantidade de litros': 'litros'
-    })
+# Calcular consumo médio por veículo
+def calcular_consumo_medio(df_combined):
+    df_combined = df_combined.dropna(subset=['placa', 'data', 'km_atual', 'litros'])
+    df_combined = df_combined.sort_values(['placa', 'data', 'km_atual']).reset_index(drop=True)
+    df_combined['km_diff'] = df_combined.groupby('placa')['km_atual'].diff()
+    df_combined['consumo_por_km'] = df_combined['litros'] / df_combined['km_diff']
+    df_clean = df_combined[(df_combined['km_diff'] > 0) & (df_combined['consumo_por_km'].notna())]
+    resultado = df_clean.groupby('placa')['consumo_por_km'].mean().reset_index()
+    resultado['km_por_litro'] = 1 / resultado['consumo_por_km']
+    return resultado.sort_values('km_por_litro', ascending=False)
 
-    for df in [df1, df2]:
-        df['data'] = pd.to_datetime(df['data'], dayfirst=True, errors='coerce')
-        df['placa'] = df['placa'].astype(str).str.replace(' ', '').str.upper()
-        df['km_atual'] = pd.to_numeric(df['km_atual'], errors='coerce')
-        df['litros'] = pd.to_numeric(df['litros'], errors='coerce')
-
-    df_comb = pd.concat([df1[['placa', 'data', 'km_atual', 'litros']], df2[['placa', 'data', 'km_atual', 'litros']]])
-    df_comb = df_comb.dropna()
-    df_comb = df_comb.sort_values(['placa', 'data', 'km_atual'])
-
-    df_comb['km_diff'] = df_comb.groupby('placa')['km_atual'].diff()
-    df_comb['consumo_por_km'] = df_comb['litros'] / df_comb['km_diff']
-    df_valid = df_comb[(df_comb['km_diff'] > 0) & (df_comb['consumo_por_km'].notnull())]
-
-    consumo_medio = df_valid.groupby('placa')['consumo_por_km'].mean().reset_index()
-    consumo_medio['km_por_litro'] = 1 / consumo_medio['consumo_por_km']
-    return consumo_medio[['placa', 'km_por_litro']].sort_values(by='km_por_litro', ascending=False)
-
+# Função principal
 def main():
-    st.title('⛽ Relatório de Abastecimento com Filtro de Ano')
+    st.title('⛽ Relatório de Abastecimento Interno x Externo')
+    st.markdown("Envie as duas bases (.csv ou .xlsx) para comparar abastecimentos e calcular consumo médio.")
 
-    uploaded_base1 = st.file_uploader('📂 Base 1 – Abastecimento Externo (.csv ou .xlsx)', type=['csv', 'xlsx'])
-    uploaded_base2 = st.file_uploader('📂 Base 2 – Abastecimento Interno (.csv ou .xlsx)', type=['csv', 'xlsx'])
+    uploaded_externo = st.file_uploader("📂 Base Externa (com coluna CONSUMO)", type=['csv', 'xlsx'])
+    uploaded_interno = st.file_uploader("📂 Base Interna (com coluna Quantidade de litros)", type=['csv', 'xlsx'])
 
-    if uploaded_base1 and uploaded_base2:
-        base1 = carregar_base(uploaded_base1, 'Base 1 (Externo)')
-        base2 = carregar_base(uploaded_base2, 'Base 2 (Interno)')
+    if uploaded_externo and uploaded_interno:
+        try:
+            # Detecta formato
+            if uploaded_externo.name.endswith('.csv'):
+                base_ext = pd.read_csv(uploaded_externo)
+            else:
+                base_ext = pd.read_excel(uploaded_externo, engine='openpyxl')
 
-        if base1 is not None and base2 is not None:
-            # Detectar anos disponíveis
-            col_data1 = detectar_coluna_data(base1)
-            col_data2 = detectar_coluna_data(base2)
-            anos1 = pd.to_datetime(base1[col_data1], dayfirst=True, errors='coerce').dt.year.dropna().unique()
-            anos2 = pd.to_datetime(base2[col_data2], dayfirst=True, errors='coerce').dt.year.dropna().unique()
-            anos_disponiveis = sorted(set(anos1).union(set(anos2)))
+            if uploaded_interno.name.endswith('.csv'):
+                base_int = pd.read_csv(uploaded_interno)
+            else:
+                base_int = pd.read_excel(uploaded_interno, engine='openpyxl')
 
-            ano = st.selectbox("📅 Escolha o ano para análise:", anos_disponiveis, index=len(anos_disponiveis)-1)
+            # Tratar bases
+            base_ext = calcular_externo(base_ext)
+            base_int = calcular_interno(base_int)
 
-            base1_ano = aplicar_filtro_ano(base1, ano)
-            base2_ano = aplicar_filtro_ano(base2, ano)
+            # Padronizar datas e placas
+            base_ext['data'] = pd.to_datetime(base_ext['DATA'], dayfirst=True, errors='coerce')
+            base_ext['placa'] = base_ext['PLACA'].astype(str).str.replace(' ', '').str.upper()
+            base_ext['km_atual'] = pd.to_numeric(base_ext['KM ATUAL'], errors='coerce')
 
-            st.markdown(f"**Linhas externas para {ano}:** {len(base1_ano)}")
-            st.markdown(f"**Linhas internas para {ano}:** {len(base2_ano)}")
+            base_int['data'] = pd.to_datetime(base_int['Data'], dayfirst=True, errors='coerce')
+            base_int['placa'] = base_int['Placa'].astype(str).str.replace(' ', '').str.upper()
+            base_int['km_atual'] = pd.to_numeric(base_int['KM Atual'], errors='coerce')
 
-            litros_ext, valor_ext = calcular_externo(base1_ano)
-            litros_int = calcular_interno(base2_ano)
+            # Filtro por ano
+            ano_disponiveis = sorted(set(base_ext['data'].dt.year.dropna().unique()) |
+                                     set(base_int['data'].dt.year.dropna().unique()))
+            ano = st.selectbox("📅 Filtrar por ano", ano_disponiveis, index=len(ano_disponiveis) - 1)
 
-            total_geral = litros_ext + litros_int
-            perc_ext = (litros_ext / total_geral) * 100 if total_geral > 0 else 0
-            perc_int = (litros_int / total_geral) * 100 if total_geral > 0 else 0
+            base_ext_ano = base_ext[base_ext['data'].dt.year == ano]
+            base_int_ano = base_int[base_int['data'].dt.year == ano]
 
-            st.markdown(f"### 🔍 Comparativo Interno x Externo – {ano}")
+            # Totais
+            litros_ext = base_ext_ano['litros'].sum()
+            valor_ext = base_ext_ano['valor'].sum()
+            litros_int = base_int_ano['litros'].sum()
+            total_litros = litros_ext + litros_int
+
+            perc_ext = (litros_ext / total_litros) * 100 if total_litros > 0 else 0
+            perc_int = (litros_int / total_litros) * 100 if total_litros > 0 else 0
+
+            st.subheader(f'📊 Resumo do Abastecimento - Ano {ano}')
             col1, col2 = st.columns(2)
             with col1:
-                st.metric('🚛 Litros externos', f'{litros_ext:,.2f} L')
-                st.metric('💰 Valor gasto', f'R$ {valor_ext:,.2f}')
-                st.metric('🔴 % externo', f'{perc_ext:.1f}%')
+                st.metric("🚛 Litros abastecidos externamente", f"{litros_ext:,.2f} L")
+                st.metric("💰 Valor gasto com externo", f"R$ {valor_ext:,.2f}")
+                st.metric("🔴 % abastecimento externo", f"{perc_ext:.1f}%")
             with col2:
-                st.metric('🏭 Litros internos', f'{litros_int:,.2f} L')
-                st.metric('🟢 % interno', f'{perc_int:.1f}%')
+                st.metric("🏭 Litros abastecidos internamente", f"{litros_int:,.2f} L")
+                st.metric("🟢 % abastecimento interno", f"{perc_int:.1f}%")
 
-            st.divider()
-            st.markdown(f"### 📈 Consumo Médio por Veículo – {ano}")
-            consumo_medio = calcular_consumo_medio(base1_ano, base2_ano)
-            st.dataframe(consumo_medio.style.format({'km_por_litro': '{:.2f}'}), height=400)
+            # Consumo médio
+            st.subheader('📈 Consumo Médio por Veículo (Km por Litro)')
+            df_combined = pd.concat([
+                base_ext_ano[['placa', 'data', 'km_atual', 'litros']],
+                base_int_ano[['placa', 'data', 'km_atual', 'litros']]
+            ], ignore_index=True)
 
-        else:
-            st.warning('❌ Falha ao processar uma das bases.')
+            consumo_medio = calcular_consumo_medio(df_combined)
+            st.dataframe(consumo_medio[['placa', 'km_por_litro']].style.format({'km_por_litro': '{:.2f}'}))
+
+        except Exception as e:
+            st.error(f"Erro ao processar os dados: {e}")
     else:
-        st.info('⬆️ Faça upload das duas bases para visualizar o relatório.')
+        st.info("⬆️ Envie as duas bases para continuar.")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-
