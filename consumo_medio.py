@@ -3,7 +3,7 @@ import pandas as pd
 
 st.set_page_config(page_title='Relatório de Abastecimento Interno x Externo', layout='centered')
 
-def carregar_base(uploaded_file, tipo_base):
+def carregar_base(uploaded_file, tipo_base, nome_coluna_data=None):
     try:
         if uploaded_file.name.lower().endswith('.csv'):
             df = pd.read_csv(uploaded_file, sep=None, engine='python')
@@ -18,6 +18,10 @@ def carregar_base(uploaded_file, tipo_base):
             st.warning(f"Formato de arquivo não suportado para {tipo_base}. Use .csv ou .xlsx.")
             return None
 
+        # Se nome da coluna data foi informado, converte para datetime
+        if nome_coluna_data and nome_coluna_data in df.columns:
+            df[nome_coluna_data] = pd.to_datetime(df[nome_coluna_data], dayfirst=True, errors='coerce')
+
         st.success(f'{tipo_base} carregada com sucesso! Linhas: {len(df)}')
         return df
     except Exception as e:
@@ -29,64 +33,59 @@ def tratar_valor(valor_str):
         valor = str(valor_str).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
         return float(valor)
     except:
-        return 0.0
+        return None
 
-def tratar_litros(valor_str):
-    try:
-        val = str(valor_str).replace(' ', '').replace('.', '').replace(',', '.')
-        return float(val)
-    except:
-        return 0.0
+def calcular_externo(df):
+    litros = pd.to_numeric(df.get('CONSUMO', None), errors='coerce')
+    if 'C/ DESC' in df.columns:
+        valor = df['C/ DESC'].apply(tratar_valor)
+    elif 'CUSTO TOTAL' in df.columns:
+        valor = df['CUSTO TOTAL'].apply(tratar_valor)
+    else:
+        valor = pd.Series([0]*len(df))
+    total_litros = litros.sum() if litros is not None else 0
+    total_valor = valor.sum() if valor is not None else 0
+    return total_litros, total_valor
+
+def calcular_interno(df):
+    if 'Quantidade de litros' in df.columns:
+        litros = pd.to_numeric(df['Quantidade de litros'], errors='coerce')
+        return litros.sum()
+    return 0
 
 def main():
-    st.title('Relatório de Abastecimento Interno x Externo')
+    st.title('⛽ Relatório de Abastecimento Interno x Externo com Filtro de Data')
 
-    uploaded_base1 = st.file_uploader('Base 1 – Abastecimento Externo (.csv ou .xlsx)', type=['csv', 'xlsx'])
-    uploaded_base2 = st.file_uploader('Base 2 – Abastecimento Interno (.csv ou .xlsx)', type=['csv', 'xlsx'])
+    uploaded_base1 = st.file_uploader('📂 Base 1 – Abastecimento Externo (.csv ou .xlsx)', type=['csv', 'xlsx'])
+    uploaded_base2 = st.file_uploader('📂 Base 2 – Abastecimento Interno (.csv ou .xlsx)', type=['csv', 'xlsx'])
 
     if uploaded_base1 and uploaded_base2:
-        base1 = carregar_base(uploaded_base1, 'Base 1 (Externo)')
-        base2 = carregar_base(uploaded_base2, 'Base 2 (Interno)')
+        # Carregar bases e converter coluna de data
+        base1 = carregar_base(uploaded_base1, 'Base 1 (Externo)', nome_coluna_data='DATA')
+        base2 = carregar_base(uploaded_base2, 'Base 2 (Interno)', nome_coluna_data='Data')
 
         if base1 is not None and base2 is not None:
-            # Converter datas e padronizar placas
-            base1['data'] = pd.to_datetime(base1['DATA'], dayfirst=True, errors='coerce')
-            base2['data'] = pd.to_datetime(base2['Data'], dayfirst=True, errors='coerce')
+            # Seleção do intervalo de datas para filtragem
+            start_date = st.date_input('Data inicial', value=pd.to_datetime('2023-01-01'))
+            end_date = st.date_input('Data final', value=pd.to_datetime('today'))
 
-            base1['placa'] = base1['PLACA'].astype(str).str.replace(' ', '').str.upper()
-            base2['placa'] = base2['Placa'].astype(str).str.replace(' ', '').str.upper()
+            # Converter date_input para datetime para comparação
+            start_date = pd.to_datetime(start_date)
+            end_date = pd.to_datetime(end_date)
 
-            # Tratar litros e km
-            base1['litros'] = base1['CONSUMO'].apply(tratar_litros)
-            base1['km_atual'] = pd.to_numeric(base1['KM ATUAL'], errors='coerce')
+            # Filtrar dados pelas datas - atenção para colunas corretas
+            base1_filt = base1[(base1['DATA'] >= start_date) & (base1['DATA'] <= end_date)]
+            base2_filt = base2[(base2['Data'] >= start_date) & (base2['Data'] <= end_date)]
 
-            base2['litros'] = pd.to_numeric(base2['Quantidade de litros'], errors='coerce')
-            base2['km_atual'] = pd.to_numeric(base2['KM Atual'], errors='coerce')
+            litros_ext, valor_ext = calcular_externo(base1_filt)
+            litros_int = calcular_interno(base2_filt)
 
-            # Filtro de datas
-            start_date = st.date_input('Data inicial', value=pd.to_datetime('2025-01-01'))
-            end_date = st.date_input('Data final', value=pd.to_datetime('2025-12-31'))
+            total_geral = litros_ext + litros_int
+            perc_int = (litros_int / total_geral) * 100 if total_geral > 0 else 0
+            perc_ext = (litros_ext / total_geral) * 100 if total_geral > 0 else 0
 
-            if start_date > end_date:
-                st.error("Data inicial deve ser menor ou igual à data final.")
-                return
+            st.subheader('Resumo do Abastecimento (com filtro de data)')
 
-            base1_filt = base1[(base1['data'] >= start_date) & (base1['data'] <= end_date)]
-            base2_filt = base2[(base2['data'] >= start_date) & (base2['data'] <= end_date)]
-
-            litros_ext = base1_filt['litros'].sum()
-            litros_int = base2_filt['litros'].sum()
-
-            total_litros = litros_ext + litros_int
-            perc_ext = (litros_ext / total_litros) * 100 if total_litros > 0 else 0
-            perc_int = (litros_int / total_litros) * 100 if total_litros > 0 else 0
-
-            valor_ext = 0
-            if 'CUSTO TOTAL' in base1_filt.columns:
-                valor_ext = base1_filt['CUSTO TOTAL'].apply(tratar_valor).sum()
-
-            # Layout resumo
-            st.subheader(f'Resumo do Abastecimento ({start_date} a {end_date})')
             col1, col2 = st.columns(2)
             with col1:
                 st.metric('Litros abastecidos externamente', f'{litros_ext:,.2f} L')
@@ -96,36 +95,10 @@ def main():
                 st.metric('Litros abastecidos internamente', f'{litros_int:,.2f} L')
                 st.metric('Percentual interno', f'{perc_int:.1f}%')
 
-            # Consumo médio por veículo
-            df_combined = pd.concat([
-                base1_filt[['placa', 'data', 'km_atual', 'litros']],
-                base2_filt[['placa', 'data', 'km_atual', 'litros']]
-            ], ignore_index=True)
-
-            df_combined = df_combined.sort_values(['placa', 'data', 'km_atual']).reset_index(drop=True)
-            df_combined['km_diff'] = df_combined.groupby('placa')['km_atual'].diff()
-            df_combined['consumo_por_km'] = df_combined['litros'] / df_combined['km_diff']
-
-            df_clean = df_combined.dropna(subset=['km_diff', 'consumo_por_km'])
-            df_clean = df_clean[df_clean['km_diff'] > 0]
-
-            consumo_medio = df_clean.groupby('placa')['consumo_por_km'].mean().reset_index()
-            consumo_medio['km_por_litro'] = 1 / consumo_medio['consumo_por_km']
-
-            st.subheader('Consumo Médio por Veículo (Km por Litro)')
-            st.dataframe(consumo_medio[['placa', 'km_por_litro']].sort_values('km_por_litro', ascending=False).style.format({'km_por_litro': '{:.2f}'}))
-
-            # Ranking veículos que mais abasteceram externamente
-            ranking_externo = base1_filt.groupby('placa')['litros'].sum().reset_index()
-            ranking_externo = ranking_externo.sort_values('litros', ascending=False).reset_index(drop=True)
-
-            st.subheader('Veículos que Mais Abasteceram Externamente')
-            st.dataframe(ranking_externo.style.format({'litros': '{:,.2f}'}))
-
         else:
-            st.warning('Não foi possível processar uma das bases. Verifique os dados.')
+            st.warning('Não foi possível carregar uma ou ambas as bases.')
     else:
-        st.info('Envie as duas bases para calcular o comparativo.')
+        st.info('Por favor, faça upload das duas bases para calcular o relatório.')
 
 if __name__ == '__main__':
     main()
