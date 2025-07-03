@@ -31,27 +31,49 @@ def tratar_valor(valor_str):
     except:
         return None
 
-def calcular_externo(df):
-    # Coluna de litros
-    litros = pd.to_numeric(df.get('CONSUMO', None), errors='coerce')
+def tratar_litros(litros_str):
+    try:
+        litros = str(litros_str).replace(' ', '').replace('.', '').replace(',', '.')
+        return float(litros)
+    except:
+        return None
 
-    # Coluna de valor preferencial
+def calcular_externo(df):
+    # Tratamento da coluna CONSUMO (litros)
+    if 'CONSUMO' in df.columns:
+        litros = df['CONSUMO'].apply(tratar_litros)
+    else:
+        litros = pd.Series([0] * len(df))
+
+    # Tratamento coluna valor preferencial
     if 'C/ DESC' in df.columns:
         valor = df['C/ DESC'].apply(tratar_valor)
     elif 'CUSTO TOTAL' in df.columns:
         valor = df['CUSTO TOTAL'].apply(tratar_valor)
     else:
-        valor = pd.Series([0]*len(df))
+        valor = pd.Series([0] * len(df))
 
-    total_litros = litros.sum() if litros is not None else 0
-    total_valor = valor.sum() if valor is not None else 0
-    return total_litros, total_valor
+    df['litros'] = litros
+    df['valor'] = valor
+    return df
 
 def calcular_interno(df):
+    df = df.rename(columns=lambda x: x.strip())
     if 'Quantidade de litros' in df.columns:
-        litros = pd.to_numeric(df['Quantidade de litros'], errors='coerce')
-        return litros.sum()
-    return 0
+        df['litros'] = pd.to_numeric(df['Quantidade de litros'], errors='coerce')
+    else:
+        df['litros'] = 0
+    return df
+
+def calcular_consumo_medio(df_combined):
+    df_combined = df_combined.dropna(subset=['placa', 'data', 'km_atual', 'litros'])
+    df_combined = df_combined.sort_values(['placa', 'data', 'km_atual']).reset_index(drop=True)
+    df_combined['km_diff'] = df_combined.groupby('placa')['km_atual'].diff()
+    df_combined['consumo_por_km'] = df_combined['litros'] / df_combined['km_diff']
+    df_clean = df_combined[(df_combined['km_diff'] > 0) & (df_combined['consumo_por_km'].notna())]
+    resultado = df_clean.groupby('placa')['consumo_por_km'].mean().reset_index()
+    resultado['km_por_litro'] = 1 / resultado['consumo_por_km']
+    return resultado.sort_values('km_por_litro', ascending=False)
 
 def main():
     st.title('⛽ Relatório de Abastecimento Interno x Externo')
@@ -64,25 +86,65 @@ def main():
         base2 = carregar_base(uploaded_base2, 'Base 2 (Interno)')
 
         if base1 is not None and base2 is not None:
-            litros_ext, valor_ext = calcular_externo(base1)
-            litros_int = calcular_interno(base2)
+            # Tratar bases
+            base1 = calcular_externo(base1)
+            base2 = calcular_interno(base2)
 
+            # Padronizar colunas para filtro e consumo médio
+            base1['data'] = pd.to_datetime(base1['DATA'], dayfirst=True, errors='coerce')
+            base1['placa'] = base1['PLACA'].astype(str).str.replace(' ', '').str.upper()
+            base1['km_atual'] = pd.to_numeric(base1['KM ATUAL'], errors='coerce')
+
+            base2['data'] = pd.to_datetime(base2['Data'], dayfirst=True, errors='coerce')
+            base2['placa'] = base2['Placa'].astype(str).str.replace(' ', '').str.upper()
+            base2['km_atual'] = pd.to_numeric(base2['KM Atual'], errors='coerce')
+
+            # Filtro intervalo de datas
+            data_min = min(base1['data'].min(), base2['data'].min())
+            data_max = max(base1['data'].max(), base2['data'].max())
+
+            start_date = st.date_input('Data inicial', value=data_min)
+            end_date = st.date_input('Data final', value=data_max)
+
+            if start_date > end_date:
+                st.error("Data inicial deve ser menor ou igual à data final.")
+                return
+
+            base1_filtrada = base1[(base1['data'] >= pd.to_datetime(start_date)) & (base1['data'] <= pd.to_datetime(end_date))]
+            base2_filtrada = base2[(base2['data'] >= pd.to_datetime(start_date)) & (base2['data'] <= pd.to_datetime(end_date))]
+
+            # Totais
+            litros_ext = base1_filtrada['litros'].sum()
+            valor_ext = base1_filtrada['valor'].sum()
+            litros_int = base2_filtrada['litros'].sum()
             total_geral = litros_ext + litros_int
-            perc_int = (litros_int / total_geral) * 100 if total_geral > 0 else 0
+
             perc_ext = (litros_ext / total_geral) * 100 if total_geral > 0 else 0
+            perc_int = (litros_int / total_geral) * 100 if total_geral > 0 else 0
 
-            st.subheader('🔍 Resumo do Abastecimento')
-
+            st.subheader(f'🔍 Resumo do Abastecimento (de {start_date} a {end_date})')
             col1, col2 = st.columns(2)
 
             with col1:
-                st.metric('Litros abastecidos **externamente**', f'{litros_ext:,.2f} L')
-                st.metric('Valor gasto externo', f'R$ {valor_ext:,.2f}')
-                st.metric('% externo', f'{perc_ext:.1f}%')
+                st.metric('🚛 Litros abastecidos externamente', f'{litros_ext:,.2f} L')
+                st.metric('💰 Valor gasto externo', f'R$ {valor_ext:,.2f}')
+                st.metric('🔴 % abastecimento externo', f'{perc_ext:.1f}%')
 
             with col2:
-                st.metric('Litros abastecidos **internamente**', f'{litros_int:,.2f} L')
-                st.metric('% interno', f'{perc_int:.1f}%')
+                st.metric('🏭 Litros abastecidos internamente', f'{litros_int:,.2f} L')
+                st.metric('🟢 % abastecimento interno', f'{perc_int:.1f}%')
+
+            # Consumo médio por veículo
+            st.subheader('📈 Consumo Médio por Veículo (Km por Litro)')
+
+            df_combined = pd.concat([
+                base1_filtrada[['placa', 'data', 'km_atual', 'litros']],
+                base2_filtrada[['placa', 'data', 'km_atual', 'litros']]
+            ], ignore_index=True)
+
+            consumo_medio = calcular_consumo_medio(df_combined)
+            st.dataframe(consumo_medio[['placa', 'km_por_litro']].style.format({'km_por_litro': '{:.2f}'}))
+
         else:
             st.warning('❌ Não foi possível processar uma das bases. Verifique os dados.')
 
