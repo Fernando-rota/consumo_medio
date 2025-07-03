@@ -95,19 +95,16 @@ def main():
                 st.metric('Litros abastecidos internamente', f'{litros_int:,.2f} L')
                 st.metric('% abastecimento interno', f'{perc_int:.1f}%')
 
-            # 🔽 Top veículos que mais abasteceram externamente
+            # 🔽 Top veículos externos
             st.subheader('Top 10 veículos – Litros abastecidos externamente')
-
             top_ext = (
                 base1_filt.groupby('placa')['litros']
                 .sum()
-                .reset_index()
-                .sort_values(by='litros', ascending=False)
+                .sort_values(ascending=False)
                 .head(10)
             )
-
-            st.bar_chart(top_ext.set_index('placa')['litros'])  # gráfico primeiro
-            st.dataframe(top_ext.style.format({'litros': '{:,.2f}'}))  # depois a tabela
+            st.bar_chart(top_ext.to_frame(), use_container_width=True)
+            st.dataframe(top_ext.reset_index().rename(columns={'litros': 'Litros'}).style.format({'Litros': '{:,.2f}'}))
 
             # 🔽 Consumo médio
             df_combined = pd.concat([
@@ -126,11 +123,11 @@ def main():
             consumo_medio['km_por_litro'] = 1 / consumo_medio['consumo_por_km']
 
             consumo_sorted = consumo_medio[['placa', 'km_por_litro']].sort_values('km_por_litro', ascending=False)
+            consumo_chart = consumo_sorted.set_index('placa')
 
             st.subheader('Consumo Médio por Veículo (Km por Litro)')
-
-            st.bar_chart(consumo_sorted.set_index('placa'))  # gráfico primeiro
-            st.dataframe(consumo_sorted.style.format({'km_por_litro': '{:.2f}'}))  # depois a tabela
+            st.bar_chart(consumo_chart, use_container_width=True)
+            st.dataframe(consumo_chart.reset_index().style.format({'km_por_litro': '{:.2f}'}))
 
         else:
             st.warning('Não foi possível processar uma das bases.')
