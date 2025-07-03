@@ -1,81 +1,97 @@
 import streamlit as st
 import pandas as pd
 
-st.title('Relatório de Consumo Médio por Veículo')
+st.set_page_config(page_title='Relatório de Consumo Médio', layout='wide')
 
-# Upload das duas bases
-uploaded_base1 = st.file_uploader('Faça upload da Base 1 (cupons de abastecimento)', type=['csv', 'xlsx'])
-uploaded_base2 = st.file_uploader('Faça upload da Base 2 (controle de saída)', type=['csv', 'xlsx'])
-
-if uploaded_base1 and uploaded_base2:
-    # Carregar Base 1
-    if uploaded_base1.name.endswith('.csv'):
-        base1 = pd.read_csv(uploaded_base1, sep=None, engine='python')  # tenta detectar separador
-    else:
-        base1 = pd.read_excel(uploaded_base1)
-        
-    # Carregar Base 2
-    if uploaded_base2.name.endswith('.csv'):
-        base2 = pd.read_csv(uploaded_base2, sep=None, engine='python')
-    else:
-        base2 = pd.read_excel(uploaded_base2)
-    
-    st.write('### Preview Base 1')
-    st.dataframe(base1.head())
-    st.write('### Preview Base 2')
-    st.dataframe(base2.head())
-    
+def carregar_base(uploaded_file, tipo_base):
     try:
-        # Padronizar base1
-        base1 = base1.rename(columns={
-            'PLACA': 'placa',
-            'DATA': 'data',
-            'KM ATUAL': 'km_atual',
-            'CONSUMO': 'litros'
-        })
-        base1['data'] = pd.to_datetime(base1['data'], dayfirst=True, errors='coerce')
-        base1['placa'] = base1['placa'].astype(str).str.replace(' ', '').str.upper()
-        base1['km_atual'] = pd.to_numeric(base1['km_atual'], errors='coerce')
-        base1['litros'] = pd.to_numeric(base1['litros'], errors='coerce')
-        
-        # Padronizar base2
-        base2 = base2.rename(columns={
-            'Placa': 'placa',
-            'Data': 'data',
-            'KM Atual': 'km_atual',
-            'Quantidade de litros': 'litros'
-        })
-        base2['data'] = pd.to_datetime(base2['data'], dayfirst=True, errors='coerce')
-        base2['placa'] = base2['placa'].astype(str).str.replace(' ', '').str.upper()
-        base2['km_atual'] = pd.to_numeric(base2['km_atual'], errors='coerce')
-        base2['litros'] = pd.to_numeric(base2['litros'], errors='coerce')
-        
-        # Concatenar bases
-        df = pd.concat([base1[['placa', 'data', 'km_atual', 'litros']],
-                        base2[['placa', 'data', 'km_atual', 'litros']]],
-                       ignore_index=True)
-        
-        # Ordenar
-        df = df.sort_values(['placa', 'data', 'km_atual']).reset_index(drop=True)
-        
-        # Calcular diferença de km
-        df['km_diff'] = df.groupby('placa')['km_atual'].diff()
-        
-        # Calcular consumo por km
-        df['consumo_por_km'] = df['litros'] / df['km_diff']
-        
-        # Limpar dados inválidos
-        df_clean = df.dropna(subset=['km_diff', 'consumo_por_km'])
-        df_clean = df_clean[df_clean['km_diff'] > 0]
-        
-        # Consumo médio por veículo
-        consumo_medio = df_clean.groupby('placa')['consumo_por_km'].mean().reset_index()
-        consumo_medio['km_por_litro'] = 1 / consumo_medio['consumo_por_km']
-        
-        st.write('### Consumo Médio por Veículo (Km por Litro)')
-        st.dataframe(consumo_medio[['placa', 'km_por_litro']].sort_values('km_por_litro', ascending=False))
-        
+        if uploaded_file.name.lower().endswith('.csv'):
+            # tenta detectar separador automaticamente (pode ser melhorado conforme base)
+            df = pd.read_csv(uploaded_file, sep=None, engine='python')
+        else:
+            df = pd.read_excel(uploaded_file)
+        st.success(f'{tipo_base} carregada com sucesso! Linhas: {len(df)}')
+        return df
     except Exception as e:
-        st.error(f'Erro no processamento dos dados: {e}')
-else:
-    st.info('Por favor, faça upload das duas bases para gerar o relatório.')
+        st.error(f'Erro ao carregar {tipo_base}: {e}')
+        return None
+
+def padronizar_base1(df):
+    # Renomeia e padroniza os dados da base 1
+    cols_map = {
+        'PLACA': 'placa',
+        'DATA': 'data',
+        'KM ATUAL': 'km_atual',
+        'CONSUMO': 'litros'
+    }
+    df = df.rename(columns=cols_map)
+    df['data'] = pd.to_datetime(df['data'], dayfirst=True, errors='coerce')
+    df['placa'] = df['placa'].astype(str).str.replace(' ', '').str.upper()
+    df['km_atual'] = pd.to_numeric(df['km_atual'], errors='coerce')
+    df['litros'] = pd.to_numeric(df['litros'], errors='coerce')
+    return df[['placa', 'data', 'km_atual', 'litros']]
+
+def padronizar_base2(df):
+    # Renomeia e padroniza os dados da base 2
+    cols_map = {
+        'Placa': 'placa',
+        'Data': 'data',
+        'KM Atual': 'km_atual',
+        'Quantidade de litros': 'litros'
+    }
+    df = df.rename(columns=cols_map)
+    df['data'] = pd.to_datetime(df['data'], dayfirst=True, errors='coerce')
+    df['placa'] = df['placa'].astype(str).str.replace(' ', '').str.upper()
+    df['km_atual'] = pd.to_numeric(df['km_atual'], errors='coerce')
+    df['litros'] = pd.to_numeric(df['litros'], errors='coerce')
+    return df[['placa', 'data', 'km_atual', 'litros']]
+
+def calcular_consumo_medio(df):
+    # Ordena, calcula diferença de km, consumo e filtra dados inválidos
+    df = df.sort_values(['placa', 'data', 'km_atual']).reset_index(drop=True)
+    df['km_diff'] = df.groupby('placa')['km_atual'].diff()
+    df['consumo_por_km'] = df['litros'] / df['km_diff']
+    df_clean = df.dropna(subset=['km_diff', 'consumo_por_km'])
+    df_clean = df_clean[df_clean['km_diff'] > 0]
+    consumo_medio = df_clean.groupby('placa')['consumo_por_km'].mean().reset_index()
+    consumo_medio['km_por_litro'] = 1 / consumo_medio['consumo_por_km']
+    return consumo_medio.sort_values('km_por_litro', ascending=False)
+
+def main():
+    st.title('📊 Relatório de Consumo Médio por Veículo')
+    st.markdown("""
+    Faça upload das duas bases para calcular o consumo médio por veículo (km por litro).
+    - Base 1: Cupons de abastecimento
+    - Base 2: Controle de saída
+    """)
+
+    uploaded_base1 = st.file_uploader('Base 1 (cupons de abastecimento)', type=['csv', 'xlsx'])
+    uploaded_base2 = st.file_uploader('Base 2 (controle de saída)', type=['csv', 'xlsx'])
+
+    if uploaded_base1 and uploaded_base2:
+        base1 = carregar_base(uploaded_base1, 'Base 1')
+        base2 = carregar_base(uploaded_base2, 'Base 2')
+
+        if base1 is not None and base2 is not None:
+            try:
+                df1 = padronizar_base1(base1)
+                df2 = padronizar_base2(base2)
+                df = pd.concat([df1, df2], ignore_index=True)
+                consumo_medio = calcular_consumo_medio(df)
+
+                st.write('### Visualização dos Dados Combinados')
+                st.dataframe(df.head(10))
+
+                st.write('### Consumo Médio por Veículo (Km por Litro)')
+                st.dataframe(consumo_medio[['placa', 'km_por_litro']].style.format({'km_por_litro': '{:.2f}'}))
+
+            except Exception as e:
+                st.error(f'Erro no processamento dos dados: {e}')
+        else:
+            st.warning('Erro ao carregar uma das bases, verifique o arquivo e tente novamente.')
+
+    else:
+        st.info('Por favor, faça upload das duas bases para gerar o relatório.')
+
+if __name__ == '__main__':
+    main()
