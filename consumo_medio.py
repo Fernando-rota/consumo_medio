@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title='Relatório de Abastecimento Interno x Externo', layout='centered')
 
@@ -17,6 +18,7 @@ def carregar_base(uploaded_file, tipo_base):
         else:
             st.warning(f"Formato de arquivo não suportado para {tipo_base}. Use .csv ou .xlsx.")
             return None
+
         st.success(f'{tipo_base} carregada com sucesso! Linhas: {len(df)}')
         return df
     except Exception as e:
@@ -48,22 +50,22 @@ def main():
         base2 = carregar_base(uploaded_base2, 'Base 2 (Interno)')
 
         if base1 is not None and base2 is not None:
-            # Corrigir nomes das colunas de data conforme planilhas
+            # Converter datas para datetime
             base1['data'] = pd.to_datetime(base1['DATA'], dayfirst=True, errors='coerce')
             base2['data'] = pd.to_datetime(base2['Data'], dayfirst=True, errors='coerce')
 
-            # Padronizar placas: remover espaços e maiúsculas
+            # Padronizar placas
             base1['placa'] = base1['PLACA'].astype(str).str.replace(' ', '').str.upper()
             base2['placa'] = base2['Placa'].astype(str).str.replace(' ', '').str.upper()
 
-            # Tratar litros e KM Atual
+            # Tratar litros e km
             base1['litros'] = base1['CONSUMO'].apply(tratar_litros)
             base1['km_atual'] = pd.to_numeric(base1['KM ATUAL'], errors='coerce')
 
             base2['litros'] = pd.to_numeric(base2['Quantidade de litros'], errors='coerce')
             base2['km_atual'] = pd.to_numeric(base2['KM Atual'], errors='coerce')
 
-            # Intervalo de datas
+            # Seleção intervalo de datas
             start_date = st.date_input('Data inicial', value=pd.to_datetime('2025-01-01'))
             end_date = st.date_input('Data final', value=pd.to_datetime('2025-12-31'))
 
@@ -71,33 +73,43 @@ def main():
                 st.error("Data inicial deve ser menor ou igual à data final.")
                 return
 
-            # Filtrar intervalos
-            base1_filt = base1[(base1['data'] >= pd.to_datetime(start_date)) & (base1['data'] <= pd.to_datetime(end_date))]
-            base2_filt = base2[(base2['data'] >= pd.to_datetime(start_date)) & (base2['data'] <= pd.to_datetime(end_date))]
+            # Filtrar bases por data
+            base1_filt = base1[(base1['data'] >= start_date) & (base1['data'] <= end_date)]
+            base2_filt = base2[(base2['data'] >= start_date) & (base2['data'] <= end_date)]
 
             litros_ext = base1_filt['litros'].sum()
             litros_int = base2_filt['litros'].sum()
-
             total_litros = litros_ext + litros_int
             perc_ext = (litros_ext / total_litros) * 100 if total_litros > 0 else 0
             perc_int = (litros_int / total_litros) * 100 if total_litros > 0 else 0
 
-            valor_ext = 0.0
+            valor_ext = 0
             if 'CUSTO TOTAL' in base1_filt.columns:
                 valor_ext = base1_filt['CUSTO TOTAL'].apply(tratar_valor).sum()
 
             st.subheader(f'Resumo do Abastecimento ({start_date} a {end_date})')
 
-            col1, col2 = st.columns(2)
-            with col1:
+            c1, c2 = st.columns(2)
+            with c1:
                 st.metric('Litros abastecidos externamente', f'{litros_ext:,.2f} L')
                 st.metric('Valor gasto externo', f'R$ {valor_ext:,.2f}')
-                st.metric('Percentual externo', f'{perc_ext:.1f}%')
-            with col2:
+                st.metric('% abastecimento externo', f'{perc_ext:.1f}%')
+            with c2:
                 st.metric('Litros abastecidos internamente', f'{litros_int:,.2f} L')
-                st.metric('Percentual interno', f'{perc_int:.1f}%')
+                st.metric('% abastecimento interno', f'{perc_int:.1f}%')
 
-            # Consumo médio por veículo (combina as duas bases filtradas)
+            # KPI: veículos que mais abasteceram externamente (litros)
+            top_veiculos_ext = (
+                base1_filt.groupby('placa')['litros']
+                .sum()
+                .reset_index()
+                .sort_values(by='litros', ascending=False)
+                .head(10)
+            )
+            st.subheader('Top 10 veículos que mais abasteceram externamente (litros)')
+            st.table(top_veiculos_ext.style.format({'litros': '{:,.2f}'}))
+
+            # Consumo médio por veículo (interno + externo)
             df_combined = pd.concat([
                 base1_filt[['placa', 'data', 'km_atual', 'litros']],
                 base2_filt[['placa', 'data', 'km_atual', 'litros']]
@@ -114,13 +126,24 @@ def main():
             consumo_medio['km_por_litro'] = 1 / consumo_medio['consumo_por_km']
 
             st.subheader('Consumo Médio por Veículo (Km por Litro)')
-            st.dataframe(
-                consumo_medio[['placa', 'km_por_litro']]
-                .sort_values('km_por_litro', ascending=False)
-                .style.format({'km_por_litro': '{:.2f}'})
-            )
+
+            # Mostrar tabela ordenada
+            st.dataframe(consumo_medio[['placa', 'km_por_litro']].sort_values('km_por_litro', ascending=False).style.format({'km_por_litro': '{:.2f}'}))
+
+            # Gráfico de barras consumo médio
+            fig, ax = plt.subplots(figsize=(10, 5))
+            consumo_medio_sorted = consumo_medio.sort_values('km_por_litro', ascending=False)
+            ax.bar(consumo_medio_sorted['placa'], consumo_medio_sorted['km_por_litro'], color='steelblue')
+            ax.set_xlabel('Veículo (Placa)')
+            ax.set_ylabel('Km por Litro')
+            ax.set_title('Consumo Médio por Veículo')
+            ax.tick_params(axis='x', rotation=45)
+            plt.tight_layout()
+            st.pyplot(fig)
+
         else:
             st.warning('Não foi possível processar uma das bases. Verifique os dados.')
+
     else:
         st.info('Envie as duas bases para calcular o comparativo.')
 
