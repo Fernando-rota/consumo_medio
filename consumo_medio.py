@@ -95,67 +95,71 @@ def main():
             if 'CUSTO TOTAL' in base1.columns:
                 valor_ext = base1['CUSTO TOTAL'].apply(tratar_valor).sum()
 
-            st.subheader(f'Resumo do Abastecimento ({start_date.strftime("%d/%m/%Y")} a {end_date.strftime("%d/%m/%Y")})')
+            aba = st.tabs(["📊 Resumo Geral", "🚛 Top 10 Externo", "⛽ Consumo Médio"])
 
-            c1, c2 = st.columns(2)
-            with c1:
-                st.metric('Litros abastecidos externamente', f'{litros_ext:,.2f} L')
-                st.metric('Valor gasto externo', f'R$ {valor_ext:,.2f}')
-                st.metric('% abastecimento externo', f'{perc_ext:.1f}%')
-            with c2:
-                st.metric('Litros abastecidos internamente', f'{litros_int:,.2f} L')
-                st.metric('% abastecimento interno', f'{perc_int:.1f}%')
+            with aba[0]:
+                st.subheader(f'Resumo do Abastecimento ({start_date.strftime("%d/%m/%Y")} a {end_date.strftime("%d/%m/%Y")})')
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.metric('Litros abastecidos externamente', f'{litros_ext:,.2f} L')
+                    st.metric('Valor gasto externo', f'R$ {valor_ext:,.2f}')
+                    st.metric('% abastecimento externo', f'{perc_ext:.1f}%')
+                with c2:
+                    st.metric('Litros abastecidos internamente', f'{litros_int:,.2f} L')
+                    st.metric('% abastecimento interno', f'{perc_int:.1f}%')
 
-            st.subheader('Top 10 veículos com mais litros abastecidos (Externo)')
-            top_ext = (
-                base1.groupby('placa', as_index=False)['litros']
-                .sum()
-                .sort_values(by='litros', ascending=False)
-                .head(10)
-            )
-            st.dataframe(
-                top_ext.rename(columns={'litros': 'Litros'}).style.format({'Litros': '{:,.2f}'})
-            )
-            fig_ext = px.bar(
-                top_ext,
-                x='placa',
-                y='litros',
-                title='Top 10 Abastecimentos Externos',
-                labels={'placa': 'Placa', 'litros': 'Litros'},
-                color='litros',
-                color_continuous_scale='Blues'
-            )
-            st.plotly_chart(fig_ext, use_container_width=True)
+            with aba[1]:
+                st.subheader('Top 10 veículos com mais litros abastecidos (Externo)')
+                top_ext = (
+                    base1.groupby('placa')['litros']
+                    .sum()
+                    .sort_values(ascending=False)
+                    .head(10)
+                ).reset_index().rename(columns={'litros': 'Litros'})
 
-            df_combined = pd.concat([
-                base1[['placa', 'data', 'km_atual', 'litros']],
-                base2[['placa', 'data', 'km_atual', 'litros']]
-            ], ignore_index=True)
+                st.dataframe(top_ext.style.format({'Litros': '{:,.2f}'}))
 
-            df_combined = df_combined.sort_values(['placa', 'data', 'km_atual']).reset_index(drop=True)
-            df_combined['km_diff'] = df_combined.groupby('placa')['km_atual'].diff()
-            df_combined['consumo_por_km'] = df_combined['litros'] / df_combined['km_diff']
+                fig_ext = px.bar(
+                    top_ext,
+                    x='placa',
+                    y='Litros',
+                    title='Top 10 Abastecimentos Externos',
+                    labels={'placa': 'Placa', 'Litros': 'Litros'},
+                    color='Litros',
+                    color_continuous_scale='Blues'
+                )
+                st.plotly_chart(fig_ext, use_container_width=True)
 
-            df_clean = df_combined.dropna(subset=['km_diff', 'consumo_por_km'])
-            df_clean = df_clean[df_clean['km_diff'] > 0]
+            with aba[2]:
+                df_combined = pd.concat([
+                    base1[['placa', 'data', 'km_atual', 'litros']],
+                    base2[['placa', 'data', 'km_atual', 'litros']]
+                ], ignore_index=True)
 
-            consumo_medio = df_clean.groupby('placa')['consumo_por_km'].mean().reset_index()
-            consumo_medio['km_por_litro'] = 1 / consumo_medio['consumo_por_km']
-            consumo_medio = consumo_medio[['placa', 'km_por_litro']].sort_values('km_por_litro', ascending=False)
+                df_combined = df_combined.sort_values(['placa', 'data', 'km_atual']).reset_index(drop=True)
+                df_combined['km_diff'] = df_combined.groupby('placa')['km_atual'].diff()
+                df_combined['consumo_por_km'] = df_combined['litros'] / df_combined['km_diff']
 
-            st.subheader('Consumo Médio por Veículo (Km/L)')
-            fig_consumo = px.bar(
-                consumo_medio,
-                x='placa',
-                y='km_por_litro',
-                title='Consumo Médio por Veículo (Km/L)',
-                labels={'placa': 'Placa', 'km_por_litro': 'Km/L'},
-                color='km_por_litro',
-                color_continuous_scale='Greens'
-            )
-            st.plotly_chart(fig_consumo, use_container_width=True)
+                df_clean = df_combined.dropna(subset=['km_diff', 'consumo_por_km'])
+                df_clean = df_clean[df_clean['km_diff'] > 0]
 
-            st.dataframe(consumo_medio.style.format({'km_por_litro': '{:.2f}'}))
+                consumo_medio = df_clean.groupby('placa')['consumo_por_km'].mean().reset_index()
+                consumo_medio['km_por_litro'] = 1 / consumo_medio['consumo_por_km']
+                consumo_medio = consumo_medio[['placa', 'km_por_litro']].sort_values('km_por_litro', ascending=False)
+
+                st.subheader('Consumo Médio por Veículo (Km/L)')
+                fig_consumo = px.bar(
+                    consumo_medio,
+                    x='placa',
+                    y='km_por_litro',
+                    title='Consumo Médio por Veículo (Km/L)',
+                    labels={'placa': 'Placa', 'km_por_litro': 'Km/L'},
+                    color='km_por_litro',
+                    color_continuous_scale='Greens'
+                )
+                st.plotly_chart(fig_consumo, use_container_width=True)
+
+                st.dataframe(consumo_medio.style.format({'km_por_litro': '{:.2f}'}))
 
         else:
             st.warning('Não foi possível processar uma das bases. Verifique os dados.')
