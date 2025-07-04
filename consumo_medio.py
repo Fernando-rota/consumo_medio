@@ -36,6 +36,12 @@ def tratar_litros(x):
 def normalizar_placa(placa):
     return str(placa).upper().replace('-', '').replace(' ', '').strip()
 
+def remover_placas_invalidas(df):
+    if 'PLACA' in df.columns:
+        df['PLACA'] = df['PLACA'].apply(normalizar_placa)
+        df = df[df['PLACA'].notna() & (df['PLACA'] != '') & (df['PLACA'] != '-')]
+    return df
+
 def main():
     st.markdown("<h1 style='text-align:center;'>⛽ Abastecimento Interno vs Externo</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:gray;'>Análise comparativa de consumo, custo e eficiência por veículo</p>", unsafe_allow_html=True)
@@ -56,10 +62,13 @@ def main():
     if df_ext is None or df_int is None or df_val is None:
         return
 
+    # Padronizar colunas e remover placas inválidas
     for df in [df_ext, df_int, df_val]:
         df.columns = df.columns.str.strip().str.upper()
-        if 'PLACA' in df.columns:
-            df['PLACA'] = df['PLACA'].apply(normalizar_placa)
+
+    df_ext = remover_placas_invalidas(df_ext)
+    df_int = remover_placas_invalidas(df_int)
+    df_val = remover_placas_invalidas(df_val)
 
     if 'CONSUMO' not in df_ext.columns or 'DATA' not in df_ext.columns:
         st.error("A base externa deve conter as colunas 'CONSUMO' e 'DATA'.")
@@ -73,7 +82,6 @@ def main():
         st.error("A base interna deve conter a coluna 'DATA'.")
         return
 
-    df_int = df_int[df_int['PLACA'] != '-']
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
 
     data_val_col = next((c for c in df_val.columns if 'DATA' in c or 'DT.' in c), None)
@@ -103,7 +111,7 @@ def main():
     with st.sidebar:
         st.header("Filtros Gerais")
         filtro_combustivel = st.selectbox('🛢️ Tipo de Combustível:', ['Todos'] + tipos_combustivel) if tipos_combustivel else 'Todos'
-        placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique())
+        placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique().tolist())
         filtro_placa = st.selectbox('🚗 Placa:', ['Todas'] + placas)
 
     if filtro_combustivel != 'Todos':
