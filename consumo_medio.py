@@ -98,16 +98,17 @@ def main():
     df_int = df_int[(df_int['DATA'].dt.date >= ini) & (df_int['DATA'].dt.date <= fim)]
     df_val = df_val[(df_val['DATA'].dt.date >= ini) & (df_val['DATA'].dt.date <= fim)]
 
-    # Filtro por tipo de combustível (base externa) - melhoria
+    # Filtro por tipo de combustível (base externa) - botões de seleção
     combustivel_col = next((col for col in df_ext.columns if 'DESCRIÇÃO' in col or 'DESCRI' in col), None)
+    selecionados = []
     if combustivel_col:
         df_ext[combustivel_col] = df_ext[combustivel_col].astype(str).str.strip()
         tipos_combustivel = sorted(df_ext[combustivel_col].dropna().unique())
-        selecionados = st.multiselect(
-            '🔍 Filtrar por Tipo de Combustível (Externo)',
-            options=tipos_combustivel,
-            default=tipos_combustivel
-        )
+        st.markdown("### 🔍 Filtrar por Tipo de Combustível (Externo)")
+        cols = st.columns(4)
+        for i, comb in enumerate(tipos_combustivel):
+            if cols[i % 4].checkbox(comb, value=True):
+                selecionados.append(comb)
         if selecionados:
             df_ext = df_ext[df_ext[combustivel_col].isin(selecionados)]
         else:
@@ -143,7 +144,6 @@ def main():
     perc_ext = (litros_ext / total_litros * 100) if total_litros > 0 else 0
     perc_int = (litros_int / total_litros * 100) if total_litros > 0 else 0
 
-    # Tabs para visualização
     tab1, tab2, tab3 = st.tabs(['✔️ Resumo', '🔝 Top 10', '🔍 Consumo Médio'])
 
     with tab1:
@@ -160,28 +160,30 @@ def main():
             'Interno': [litros_int, valor_int]
         }).melt(id_vars='Métrica', var_name='Tipo', value_name='Valor')
 
-        # Paleta de cores personalizadas
-        colors = {'Externo': '#1f77b4', 'Interno': '#ff7f0e'}
+        # Gráfico horizontal estilo BI
+        colors = {'Externo': '#2c7fb8', 'Interno': '#7fcdbb'}
 
         fig = px.bar(
             df_kpi,
-            x='Métrica',
-            y='Valor',
+            y='Métrica',
+            x='Valor',
             color='Tipo',
             barmode='group',
             text=df_kpi['Valor'].apply(lambda v: f'R$ {v:,.2f}' if v > 1000 else f'{v:,.2f}'),
-            color_discrete_map=colors
+            color_discrete_map=colors,
+            orientation='h'
         )
-        fig.update_traces(marker_line_width=1.5, marker_line_color='white', textposition='outside', textfont_size=14)
+        fig.update_traces(marker_line_width=0, textposition='outside', textfont_size=14)
         fig.update_layout(
             title='Comparativo Externo vs Interno',
             title_font_size=24,
-            yaxis_title='Valor',
-            xaxis_title='Métrica',
-            yaxis=dict(showgrid=True, gridcolor='LightGray'),
-            legend_title_text='Tipo',
+            xaxis_title='Valor',
+            yaxis_title='Métrica',
+            yaxis=dict(categoryorder='array', categoryarray=['Litros', 'Custo']),
             plot_bgcolor='white',
-            margin=dict(t=50, b=50, l=40, r=40)
+            margin=dict(t=50, b=50, l=100, r=40),
+            legend_title_text='Tipo',
+            xaxis=dict(showgrid=True, gridcolor='LightGray')
         )
         st.plotly_chart(fig, use_container_width=True)
 
@@ -207,7 +209,6 @@ def main():
     with tab3:
         st.subheader('🔍 Consumo Médio (Km/L)')
 
-        # Preparar dados para consumo médio
         df_comb = pd.concat([
             df_ext[['PLACA', 'DATA', 'KM ATUAL', 'LITROS']].rename(columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'LITROS': 'litros'}),
             df_int[['PLACA', 'DATA', 'KM ATUAL', 'QUANTIDADE DE LITROS']].rename(columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'QUANTIDADE DE LITROS': 'litros'})
