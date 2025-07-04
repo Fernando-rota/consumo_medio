@@ -24,7 +24,10 @@ def tratar_litros(valor_str):
 def carregar_base(uploaded_file):
     try:
         if uploaded_file.name.lower().endswith('.csv'):
-            return pd.read_csv(uploaded_file, sep=None, engine='python')
+            try:
+                return pd.read_csv(uploaded_file, sep=';', engine='python')
+            except:
+                return pd.read_csv(uploaded_file, sep=',', engine='python')
         elif uploaded_file.name.lower().endswith(('.xls', '.xlsx')):
             import openpyxl
             return pd.read_excel(uploaded_file, engine='openpyxl')
@@ -54,31 +57,45 @@ def main():
             st.error("Erro ao carregar uma ou mais bases.")
             return
 
-        # Tratamento padrão das colunas
-        df_ext['data'] = pd.to_datetime(df_ext['DATA'], dayfirst=True, errors='coerce')
-        df_ext['placa'] = df_ext['PLACA'].astype(str).str.replace(' ', '').str.upper()
-        df_ext['litros'] = df_ext['CONSUMO'].apply(tratar_litros)
-        df_ext['km_atual'] = pd.to_numeric(df_ext['KM ATUAL'], errors='coerce')
+        # Padronização da externa
+        df_ext['data'] = pd.to_datetime(df_ext.get('DATA'), dayfirst=True, errors='coerce')
+        df_ext['placa'] = df_ext.get('PLACA', '').astype(str).str.replace(' ', '').str.upper()
+        df_ext['litros'] = df_ext.get('CONSUMO', 0).apply(tratar_litros)
+        df_ext['km_atual'] = pd.to_numeric(df_ext.get('KM ATUAL'), errors='coerce')
 
-        df_int = df_int[df_int['Placa'].str.upper().ne('ENTRADA POSTO INTERNO')]
-        df_int['data'] = pd.to_datetime(df_int['Data'], dayfirst=True, errors='coerce')
-        df_int['placa'] = df_int['Placa'].astype(str).str.replace(' ', '').str.upper()
-        df_int['litros'] = pd.to_numeric(df_int['Quantidade de litros'], errors='coerce')
-        df_int['km_atual'] = pd.to_numeric(df_int['KM Atual'], errors='coerce')
+        # Padronização da interna
+        if 'Placa' in df_int.columns:
+            df_int = df_int[df_int['Placa'].str.upper().ne('ENTRADA POSTO INTERNO')]
+            df_int['placa'] = df_int['Placa'].astype(str).str.replace(' ', '').str.upper()
+        else:
+            df_int['placa'] = ''
 
-        # Data custo
+        df_int['data'] = pd.to_datetime(df_int.get('Data'), dayfirst=True, errors='coerce')
+        df_int['litros'] = pd.to_numeric(df_int.get('Quantidade de litros'), errors='coerce')
+        df_int['km_atual'] = pd.to_numeric(df_int.get('KM Atual'), errors='coerce')
+
+        # Padronização da base de custo
         for col in ['Data', 'DATA', 'data']:
             if col in df_val.columns:
                 df_val['data'] = pd.to_datetime(df_val[col], dayfirst=True, errors='coerce')
                 break
+        else:
+            df_val['data'] = pd.NaT
 
-        df_val['placa'] = df_val['Placa'].astype(str).str.replace(' ', '').str.upper() if 'Placa' in df_val.columns else None
+        if 'Placa' in df_val.columns:
+            df_val['placa'] = df_val['Placa'].astype(str).str.replace(' ', '').str.upper()
+        else:
+            df_val['placa'] = ''
 
-        # Valor custo
-        col_val = [c for c in df_val.columns if 'valor' in c.lower()][0]
-        df_val['valor_pago'] = df_val[col_val].apply(tratar_valor)
+        col_val_list = [c for c in df_val.columns if 'valor' in c.lower()]
+        if col_val_list:
+            col_val = col_val_list[0]
+            df_val['valor_pago'] = df_val[col_val].apply(tratar_valor)
+        else:
+            st.warning("Coluna de valor não encontrada na base de custo do combustível.")
+            df_val['valor_pago'] = 0.0
 
-        # Filtros
+        # Filtros por data
         colf1, colf2 = st.columns(2)
         with colf1:
             data_ini = st.date_input("Data Inicial", value=df_ext['data'].min())
@@ -92,12 +109,19 @@ def main():
         # KPIs
         litros_ext = df_ext['litros'].sum()
         litros_int = df_int['litros'].sum()
-        valor_ext = df_ext['CUSTO TOTAL'].apply(tratar_valor).sum()
+
+        col_custo_ext = [c for c in df_ext.columns if 'custo total' in c.lower()]
+        if col_custo_ext:
+            valor_ext = df_ext[col_custo_ext[0]].apply(tratar_valor).sum()
+        else:
+            st.warning("Coluna 'CUSTO TOTAL' não encontrada na base externa.")
+            valor_ext = 0.0
+
         valor_int = df_val['valor_pago'].sum()
 
         total_litros = litros_ext + litros_int
-        perc_ext = (litros_ext / total_litros) * 100 if total_litros > 0 else 0
-        perc_int = (litros_int / total_litros) * 100 if total_litros > 0 else 0
+        perc_ext = (litros_ext / total_litros * 100) if total_litros > 0 and pd.notna(litros_ext) else 0
+        perc_int = (litros_int / total_litros * 100) if total_litros > 0 and pd.notna(litros_int) else 0
 
         st.markdown(f"<h4 style='margin-top:10px;'>Período: {data_ini.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}</h4>", unsafe_allow_html=True)
 
