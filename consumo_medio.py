@@ -92,13 +92,13 @@ def main():
         df_ext[combustivel_col] = df_ext[combustivel_col].astype(str).str.strip()
         tipos_disponiveis = sorted(df_ext[combustivel_col].dropna().unique())
         with st.expander('🔍 Tipo de Combustível (Externo)', expanded=False):
-            combustiveis_escolhidos = st.selectbox('Selecione o tipo', options=tipos_disponiveis)
-        df_ext = df_ext[df_ext[combustivel_col] == combustiveis_escolhidos]
+            combustiveis_escolhidos = st.multiselect('Tipo de Combustível:', options=tipos_disponiveis, default=tipos_disponiveis)
+        df_ext = df_ext[df_ext[combustivel_col].isin(combustiveis_escolhidos)]
 
         tipo_combustivel_int = next((col for col in df_int.columns if 'TIPO' in col or 'DESCRI' in col), None)
         if tipo_combustivel_int:
             df_int[tipo_combustivel_int] = df_int[tipo_combustivel_int].astype(str).str.strip().str.upper()
-            df_int = df_int[df_int[tipo_combustivel_int] == combustiveis_escolhidos.upper()]
+            df_int = df_int[df_int[tipo_combustivel_int].isin([t.upper() for t in combustiveis_escolhidos])]
     else:
         st.warning('⚠️ Coluna de descrição de combustível não encontrada.')
 
@@ -125,7 +125,7 @@ def main():
     tab1, tab2, tab3 = st.tabs(['✔️ Resumo', '🔝 Top 10', '🔍 Consumo Médio'])
 
     with tab1:
-        st.subheader(f'Período: {ini.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")}')
+        st.subheader(f'Período: {ini.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")})
         c1, c2, c3, c4 = st.columns(4)
         c1.metric('⛽ Litros Ext.', f'{litros_ext:,.2f} L', delta=f'{perc_ext:.1f}%')
         c2.metric('💰 Custo Ext.', f'R$ {valor_ext:,.2f}')
@@ -139,9 +139,11 @@ def main():
         }).melt(id_vars='Métrica', var_name='Tipo', value_name='Valor')
 
         fig = px.bar(df_kpi, x='Métrica', y='Valor', color='Tipo', barmode='group', text_auto='.2s',
-                     color_discrete_map={'Externo': '#1f77b4', 'Interno': '#2ca02c'})
+                     color_discrete_map={'Externo': '#636EFA', 'Interno': '#EF553B'})
         fig.update_traces(marker_line_width=1.5, marker_line_color='white', textfont_size=14)
-        fig.update_layout(title='Comparativo Externo vs Interno', title_font_size=20, plot_bgcolor='rgba(245,245,245,1)')
+        fig.update_layout(title='Comparativo Externo vs Interno', title_font_size=20, 
+                          plot_bgcolor='#f9f9f9', paper_bgcolor='white', 
+                          font=dict(size=14), xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
