@@ -53,10 +53,26 @@ def main():
     if df_ext is None or df_int is None or df_val is None:
         return
 
-    # Padronizar colunas
+    # Padronizar colunas e remover espaços extras
     df_ext.columns = df_ext.columns.str.strip().str.upper()
     df_int.columns = df_int.columns.str.strip().str.upper()
     df_val.columns = df_val.columns.str.strip().str.upper()
+
+    # Debug: mostrar colunas carregadas
+    st.write("Colunas df_ext:", df_ext.columns.tolist())
+    st.write("Colunas df_int:", df_int.columns.tolist())
+    st.write("Colunas df_val:", df_val.columns.tolist())
+
+    # Ajustar nomes das colunas na base interna (exemplo)
+    if 'PLACA VEÍCULO' in df_int.columns and 'PLACA' not in df_int.columns:
+        df_int.rename(columns={'PLACA VEÍCULO': 'PLACA'}, inplace=True)
+
+    if 'PLACA' not in df_ext.columns:
+        st.error("Coluna 'PLACA' não encontrada na base externa.")
+        return
+    if 'PLACA' not in df_int.columns:
+        st.error("Coluna 'PLACA' não encontrada na base interna.")
+        return
 
     # Renomear 'CONSUMO' para 'LITROS' na base externa e converter para float
     if 'CONSUMO' in df_ext.columns:
@@ -77,7 +93,6 @@ def main():
         return
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
 
-    # Na base de valores, coluna data pode ser 'DT. VENCIMENTO'
     data_val_col = next((c for c in df_val.columns if 'DATA' in c or 'DT.' in c), None)
     if not data_val_col:
         st.error("Coluna de data não encontrada na base de valores.")
@@ -86,6 +101,10 @@ def main():
 
     # Filtrar base interna, remover placa '-'
     df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
+
+    # Mostrar quantidade registros após filtro de placa
+    st.write(f"Registros df_ext após carregar: {len(df_ext)}")
+    st.write(f"Registros df_int após remover placa '-': {len(df_int)}")
 
     # Selecionar período disponível
     ini_min = min(df_ext['DATA'].min(), df_int['DATA'].min(), df_val['DATA'].min()).date()
@@ -98,37 +117,29 @@ def main():
     df_int = df_int[(df_int['DATA'].dt.date >= ini) & (df_int['DATA'].dt.date <= fim)]
     df_val = df_val[(df_val['DATA'].dt.date >= ini) & (df_val['DATA'].dt.date <= fim)]
 
-    # Filtro por tipo de combustível (base externa) - botão seleção único, compacto, sem nan
+    # Filtro por tipo de combustível (base externa) - sem 'nan'
     combustivel_col = next((col for col in df_ext.columns if 'DESCRIÇÃO' in col or 'DESCRI' in col), None)
-    combustiveis_selecionados = []
+    tipos_combustivel = []
 
     if combustivel_col:
         df_ext[combustivel_col] = df_ext[combustivel_col].astype(str).str.strip()
-        # Remover 'nan' ou valores vazios do filtro
-        tipos_combustivel = sorted([x for x in df_ext[combustivel_col].dropna().unique() if x.lower() != 'nan' and x != ''])
+        # Remover entradas 'nan' e vazias do filtro
+        tipos_combustivel = sorted(df_ext[combustivel_col].dropna().unique())
+        tipos_combustivel = [t for t in tipos_combustivel if t.lower() != 'nan' and t != '']
+
         combustivel_escolhido = st.radio(
             '🔍 Filtrar por Tipo de Combustível (Externo)',
             options=tipos_combustivel,
             index=0,
             horizontal=True
         )
-        # Filtra base externa pelo combustível escolhido
         df_ext = df_ext[df_ext[combustivel_col] == combustivel_escolhido]
-
-        # Filtra base interna para o mesmo tipo de combustível
-        # Tentamos identificar a coluna equivalente na base interna
-        tipo_combustivel_int_col = next((col for col in df_int.columns if 'TIPO' in col or 'DESCRI' in col), None)
-        if tipo_combustivel_int_col:
-            df_int[tipo_combustivel_int_col] = df_int[tipo_combustivel_int_col].astype(str).str.strip()
-            # Para comparação, padronizamos para maiúsculas e removemos espaços
-            filtro_int = df_int[tipo_combustivel_int_col].str.upper() == combustivel_escolhido.upper()
-            df_int = df_int[filtro_int]
-        else:
-            # Se não tiver coluna para tipo de combustível na interna, filtrar somente por placa que aparece na externa (opcional)
-            placas_validas = df_ext['PLACA'].unique()
-            df_int = df_int[df_int['PLACA'].isin(placas_validas)]
     else:
         st.warning('Coluna de descrição do combustível não encontrada na base externa.')
+
+    # Após filtro, debug quantidade e colunas
+    st.write(f"Registros df_ext após filtro combustível '{combustivel_escolhido}': {len(df_ext)}")
+    st.write("Colunas df_ext pós filtro:", df_ext.columns.tolist())
 
     # Normalizar colunas
     df_ext['PLACA'] = df_ext['PLACA'].astype(str).str.upper().str.strip()
@@ -140,7 +151,6 @@ def main():
     df_int['KM ATUAL'] = pd.to_numeric(df_int.get('KM ATUAL'), errors='coerce')
     df_int['QUANTIDADE DE LITROS'] = pd.to_numeric(df_int.get('QUANTIDADE DE LITROS'), errors='coerce').fillna(0.0)
 
-    # Coluna valor total da base combustível
     val_col = next((c for c in df_val.columns if 'VALOR' in c), None)
     if val_col:
         df_val['VALOR_TOTAL'] = df_val[val_col].apply(tratar_valor)
@@ -148,21 +158,11 @@ def main():
         st.warning("Coluna 'Valor Total' não encontrada na base de valores.")
         df_val['VALOR_TOTAL'] = 0.0
 
-    # Somar KPIs para cálculo correto, comparando apenas o combustível selecionado
+    # Somar KPIs filtrados
     litros_ext = df_ext['LITROS'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
-
-    # Para base interna e valores, filtrar para o mesmo tipo de combustível
-    if combustivel_col and tipo_combustivel_int_col:
-        # Já filtramos df_int acima para mesmo tipo de combustível, assim:
-        litros_int = df_int['QUANTIDADE DE LITROS'].sum()
-        # Para valor interno, precisamos filtrar df_val para placas internas filtradas
-        placas_int = df_int['PLACA'].unique()
-        df_val_filtrado = df_val[df_val['PLACA'].isin(placas_int)]
-        valor_int = df_val_filtrado['VALOR_TOTAL'].sum()
-    else:
-        litros_int = df_int['QUANTIDADE DE LITROS'].sum()
-        valor_int = df_val['VALOR_TOTAL'].sum()
+    litros_int = df_int['QUANTIDADE DE LITROS'].sum()
+    valor_int = df_val['VALOR_TOTAL'].sum()
 
     total_litros = litros_ext + litros_int
     perc_ext = (litros_ext / total_litros * 100) if total_litros > 0 else 0
@@ -217,8 +217,17 @@ def main():
     with tab2:
         st.subheader('🔝 Top 10 Veículos por Litros Abastecidos')
 
-        top_ext = df_ext.groupby('PLACA')['LITROS'].sum().nlargest(10).reset_index()
-        top_int = df_int.groupby('PLACA')['QUANTIDADE DE LITROS'].sum().nlargest(10).reset_index()
+        try:
+            top_ext = df_ext.groupby('PLACA')['LITROS'].sum().nlargest(10).reset_index()
+        except KeyError:
+            st.error("Coluna 'PLACA' não encontrada na base externa para Top 10.")
+            top_ext = pd.DataFrame(columns=['PLACA', 'LITROS'])
+
+        try:
+            top_int = df_int.groupby('PLACA')['QUANTIDADE DE LITROS'].sum().nlargest(10).reset_index()
+        except KeyError:
+            st.error("Coluna 'PLACA' não encontrada na base interna para Top 10.")
+            top_int = pd.DataFrame(columns=['PLACA', 'QUANTIDADE DE LITROS'])
 
         col1, col2 = st.columns(2)
         with col1:
@@ -254,14 +263,11 @@ def main():
 
         consumo_medio = df_comb.groupby('placa')['consumo'].mean().reset_index().rename(columns={'consumo': 'Km/L'})
 
-        # Melhorias no gráfico: ordenar barras decrescente e usar cores fixas
-        fig3 = px.bar(
-            consumo_medio.sort_values('Km/L', ascending=False),
-            x='Km/L', y='placa', orientation='h', color='Km/L',
-            color_continuous_scale='Viridis', text_auto='.2f', title='Eficiência por Veículo'
-        )
+        fig3 = px.bar(consumo_medio.sort_values('Km/L', ascending=False),
+                      x='Km/L', y='placa', orientation='h', color='Km/L',
+                      color_continuous_scale='Viridis', text_auto='.2f',
+                      title='Eficiência por Veículo')
         fig3.update_layout(yaxis={'categoryorder': 'total descending'})
-        fig3.update_traces(textfont_size=12)
         st.plotly_chart(fig3, use_container_width=True)
 
 if __name__ == '__main__':
