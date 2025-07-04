@@ -25,26 +25,7 @@ def carregar_base(uploaded_file, tipo_base):
         return df
     except Exception as e:
         st.error(f"Erro ao carregar {tipo_base}: {e}")
-        return None(uploaded_file, tipo_base):
-    try:
-        if uploaded_file.name.lower().endswith('.csv'):
-            # Tenta inferir separador e, em caso de falha, tenta ponto-e-vírgula
-            try:
-                df = pd.read_csv(uploaded_file, sep=None, engine='python')
-            except Exception:
-                df = pd.read_csv(uploaded_file, sep=';', engine='python')
-        elif uploaded_file.name.lower().endswith(('.xls', '.xlsx')):
-            import openpyxl
-            df = pd.read_excel(uploaded_file, engine='openpyxl')
-        else:
-            st.warning(f"Formato não suportado para {tipo_base}. Use .csv ou .xlsx.")
-            return None
-        st.success(f"{tipo_base} carregada: {len(df):,} linhas")
-        return df
-    except Exception as e:
-        st.error(f"Erro ao carregar {tipo_base}: {e}")
         return None
-
 
 def tratar_valor(valor_str):
     try:
