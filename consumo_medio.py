@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title='Relatório de Abastecimento Interno x Externo', layout='wide')
+st.set_page_config(page_title='Relatório de Abastecimento Interno x Externo', layout='wide', locale="pt_BR")
 
 def carregar_base(uploaded_file, tipo_base):
     try:
@@ -62,8 +62,25 @@ def main():
             base2['litros'] = pd.to_numeric(base2['Quantidade de litros'], errors='coerce')
             base2['km_atual'] = pd.to_numeric(base2['KM Atual'], errors='coerce')
 
-            start_date = pd.to_datetime(st.date_input('Data inicial', value=pd.to_datetime('2025-01-01')))
-            end_date = pd.to_datetime(st.date_input('Data final', value=pd.to_datetime('2025-12-31')))
+            col1, col2, col3 = st.columns([1, 1, 2])
+            with col1:
+                start_date = pd.to_datetime(st.date_input('Data inicial', value=pd.to_datetime('2025-01-01')))
+            with col2:
+                end_date = pd.to_datetime(st.date_input('Data final', value=pd.to_datetime('2025-12-31')))
+            with col3:
+                descricao_abastecimento = []
+                if 'DESCRIÇÃO DO ABASTECIMENTO' in base1.columns:
+                    descricao_abastecimento = base1['DESCRIÇÃO DO ABASTECIMENTO'].dropna().unique().tolist()
+
+                filtro_descricao = None
+                if descricao_abastecimento:
+                    filtro_descricao = st.selectbox(
+                        "Tipo de Combustível (Externo)",
+                        ["Todos"] + sorted(descricao_abastecimento),
+                        key="combustivel"
+                    )
+                    if filtro_descricao and filtro_descricao != "Todos":
+                        base1 = base1[base1['DESCRIÇÃO DO ABASTECIMENTO'] == filtro_descricao]
 
             if start_date > end_date:
                 st.error("Data inicial deve ser menor ou igual à data final.")
@@ -71,19 +88,6 @@ def main():
 
             base1 = base1[(base1['data'] >= start_date) & (base1['data'] <= end_date)]
             base2 = base2[(base2['data'] >= start_date) & (base2['data'] <= end_date)]
-
-            descricao_abastecimento = []
-            if 'DESCRIÇÃO DO ABASTECIMENTO' in base1.columns:
-                descricao_abastecimento = base1['DESCRIÇÃO DO ABASTECIMENTO'].dropna().unique().tolist()
-
-            filtro_descricao = None
-            if descricao_abastecimento:
-                filtro_descricao = st.selectbox(
-                    "Filtrar por Descrição do Abastecimento (Base Externa)",
-                    ["Todos"] + sorted(descricao_abastecimento)
-                )
-                if filtro_descricao and filtro_descricao != "Todos":
-                    base1 = base1[base1['DESCRIÇÃO DO ABASTECIMENTO'] == filtro_descricao]
 
             litros_ext = base1['litros'].sum()
             litros_int = base2['litros'].sum()
@@ -95,7 +99,7 @@ def main():
             if 'CUSTO TOTAL' in base1.columns:
                 valor_ext = base1['CUSTO TOTAL'].apply(tratar_valor).sum()
 
-            aba = st.tabs(["📊 Resumo Geral", "🚛 Top 10 Externo", "⛽ Consumo Médio"])
+            aba = st.tabs(["📊 Resumo Geral", "🚛 Top 10 Abastecimento", "⛽ Consumo Médio"])
 
             with aba[0]:
                 st.subheader(f'Resumo do Abastecimento ({start_date.strftime("%d/%m/%Y")} a {end_date.strftime("%d/%m/%Y")})')
@@ -109,26 +113,21 @@ def main():
                     st.metric('% abastecimento interno', f'{perc_int:.1f}%')
 
             with aba[1]:
-                st.subheader('Top 10 veículos com mais litros abastecidos (Externo)')
-                top_ext = (
-                    base1.groupby('placa')['litros']
-                    .sum()
-                    .sort_values(ascending=False)
-                    .head(10)
-                ).reset_index().rename(columns={'litros': 'Litros'})
+                st.subheader('Top 10 veículos com mais litros abastecidos')
 
+                top_ext = base1.groupby('placa')['litros'].sum().sort_values(ascending=False).head(10).reset_index()
+                top_ext.columns = ['placa', 'Litros']
+                fig_ext = px.bar(top_ext, x='placa', y='Litros', title='Top 10 Abastecimentos Externos',
+                                 labels={'placa': 'Placa', 'Litros': 'Litros'}, color='Litros', color_continuous_scale='Blues')
+                st.plotly_chart(fig_ext, use_container_width=True)
                 st.dataframe(top_ext.style.format({'Litros': '{:,.2f}'}))
 
-                fig_ext = px.bar(
-                    top_ext,
-                    x='placa',
-                    y='Litros',
-                    title='Top 10 Abastecimentos Externos',
-                    labels={'placa': 'Placa', 'Litros': 'Litros'},
-                    color='Litros',
-                    color_continuous_scale='Blues'
-                )
-                st.plotly_chart(fig_ext, use_container_width=True)
+                top_int = base2.groupby('placa')['litros'].sum().sort_values(ascending=False).head(10).reset_index()
+                top_int.columns = ['placa', 'Litros']
+                fig_int = px.bar(top_int, x='placa', y='Litros', title='Top 10 Abastecimentos Internos',
+                                 labels={'placa': 'Placa', 'Litros': 'Litros'}, color='Litros', color_continuous_scale='Greens')
+                st.plotly_chart(fig_int, use_container_width=True)
+                st.dataframe(top_int.style.format({'Litros': '{:,.2f}'}))
 
             with aba[2]:
                 df_combined = pd.concat([
@@ -155,10 +154,9 @@ def main():
                     title='Consumo Médio por Veículo (Km/L)',
                     labels={'placa': 'Placa', 'km_por_litro': 'Km/L'},
                     color='km_por_litro',
-                    color_continuous_scale='Greens'
+                    color_continuous_scale='Purples'
                 )
                 st.plotly_chart(fig_consumo, use_container_width=True)
-
                 st.dataframe(consumo_medio.style.format({'km_por_litro': '{:.2f}'}))
 
         else:
