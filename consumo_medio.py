@@ -19,7 +19,6 @@ def carregar_base(uploaded_file, tipo_base):
             st.warning(f"Formato não suportado para {tipo_base}. Use .csv ou .xlsx.")
             return None
 
-        st.success(f'{tipo_base} carregada! Linhas: {len(df)}')
         return df
     except Exception as e:
         st.error(f'Erro ao carregar {tipo_base}: {e}')
@@ -50,15 +49,16 @@ def main():
         base2 = carregar_base(uploaded_base2, 'Base 2 (Interno)')
 
         if base1 is not None and base2 is not None:
-            col1, col2 = st.columns([1,1])
-            with col1:
-                st.markdown(f"**Base 1 (Externo):** {len(base1)} linhas")
-            with col2:
-                st.markdown(f"**Base 2 (Interno):** {len(base2)} linhas")
 
+            # Trocar placa '-' no interno para texto descritivo
+            base2['Placa'] = base2['Placa'].astype(str).str.strip()
+            base2.loc[base2['Placa'] == '-', 'Placa'] = 'Entrada Posto Interno'
+
+            # Data
             base1['data'] = pd.to_datetime(base1['DATA'], dayfirst=True, errors='coerce')
             base2['data'] = pd.to_datetime(base2['Data'], dayfirst=True, errors='coerce')
 
+            # Placa
             base1['placa'] = base1['PLACA'].astype(str).str.replace(' ', '').str.upper()
             base2['placa'] = base2['Placa'].astype(str).str.replace(' ', '').str.upper()
 
@@ -67,6 +67,13 @@ def main():
 
             base2['litros'] = pd.to_numeric(base2['Quantidade de litros'], errors='coerce')
             base2['km_atual'] = pd.to_numeric(base2['KM Atual'], errors='coerce')
+
+            # Mostrar apenas uma vez as infos base carregadas (compacto, lado a lado)
+            col1, col2 = st.columns([1,1])
+            with col1:
+                st.markdown(f"**Base 1 (Externo):** {len(base1):,} linhas")
+            with col2:
+                st.markdown(f"**Base 2 (Interno):** {len(base2):,} linhas")
 
             # Filtros na mesma linha
             fcol1, fcol2, fcol3 = st.columns([1,1,2])
