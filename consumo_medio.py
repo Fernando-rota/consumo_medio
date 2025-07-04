@@ -8,7 +8,11 @@ st.set_page_config(page_title='Relatório de Abastecimento Interno x Externo', l
 def carregar_base(uploaded_file, tipo_base):
     try:
         if uploaded_file.name.lower().endswith('.csv'):
-            df = pd.read_csv(uploaded_file, engine='python')
+            # Tenta inferir separador e, em caso de falha, tenta ponto-e-vírgula
+            try:
+                df = pd.read_csv(uploaded_file, sep=None, engine='python')
+            except Exception:
+                df = pd.read_csv(uploaded_file, sep=';', engine='python')
         elif uploaded_file.name.lower().endswith(('.xls', '.xlsx')):
             import openpyxl
             df = pd.read_excel(uploaded_file, engine='openpyxl')
