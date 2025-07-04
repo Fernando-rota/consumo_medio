@@ -138,12 +138,15 @@ def main():
             'Interno': [litros_int, valor_int]
         }).melt(id_vars='Métrica', var_name='Tipo', value_name='Valor')
 
-        fig = px.bar(df_kpi, x='Métrica', y='Valor', color='Tipo', barmode='group', text_auto='.2s',
+        df_kpi['Formato'] = df_kpi['Métrica'].apply(lambda x: 'litro' if x == 'Litros' else 'reais')
+        df_kpi['Texto'] = df_kpi.apply(lambda row: f"{row['Valor']:,.2f} L" if row['Formato'] == 'litro' else f"R$ {row['Valor']:,.2f}", axis=1)
+
+        fig = px.bar(df_kpi, x='Métrica', y='Valor', color='Tipo', barmode='group', text=df_kpi['Texto'],
                      color_discrete_map={'Externo': '#636EFA', 'Interno': '#EF553B'})
         fig.update_traces(marker_line_width=1.5, marker_line_color='white', textfont_size=14)
         fig.update_layout(title='Comparativo Externo vs Interno', title_font_size=20, 
                           plot_bgcolor='#f9f9f9', paper_bgcolor='white', 
-                          font=dict(size=14), xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
+                          font=dict(size=14), xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor='lightgray'))
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
