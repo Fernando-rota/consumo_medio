@@ -53,7 +53,8 @@ def main():
         df_int = carregar_base(uploaded_int)
         df_val = carregar_base(uploaded_comb)
 
-        if None in (df_ext, df_int, df_val):
+        # ✅ Correção do erro de verificação de None
+        if any(df is None for df in [df_ext, df_int, df_val]):
             st.error("Erro ao carregar uma ou mais bases.")
             return
 
