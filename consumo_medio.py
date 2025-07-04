@@ -1,24 +1,21 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
-st.set_page_config(page_title='Relatório Abastecimento Interno x Externo', layout='wide')
+st.set_page_config(page_title='Relatório de Abastecimento Interno x Externo', layout='wide')
 
 def carregar_base(uploaded_file, tipo_base):
     try:
         if uploaded_file.name.lower().endswith('.csv'):
             df = pd.read_csv(uploaded_file, sep=None, engine='python')
         elif uploaded_file.name.lower().endswith(('.xls', '.xlsx')):
-            try:
-                import openpyxl
-                df = pd.read_excel(uploaded_file, engine='openpyxl')
-            except ImportError:
-                st.warning(f"Arquivo {tipo_base} é Excel, mas falta o pacote openpyxl. Use CSV.")
-                return None
+            import openpyxl  # certifique que está instalado
+            df = pd.read_excel(uploaded_file, engine='openpyxl')
         else:
-            st.warning(f"Formato não suportado para {tipo_base}. Use .csv ou .xlsx.")
+            st.warning(f"Formato de arquivo não suportado para {tipo_base}. Use .csv ou .xlsx.")
             return None
-
+        st.success(f'{tipo_base} carregada com sucesso! Linhas: {len(df)}')
         return df
     except Exception as e:
         st.error(f'Erro ao carregar {tipo_base}: {e}')
@@ -39,95 +36,65 @@ def tratar_litros(valor_str):
         return 0.0
 
 def main():
-    st.title('Relatório Abastecimento Interno x Externo')
+    st.title('Relatório de Abastecimento Interno x Externo com Consumo Médio')
 
-    uploaded_base1 = st.file_uploader('Base 1 – Externo (.csv ou .xlsx)', type=['csv', 'xlsx'], key="up1")
-    uploaded_base2 = st.file_uploader('Base 2 – Interno (.csv ou .xlsx)', type=['csv', 'xlsx'], key="up2")
-    uploaded_combustivel = st.file_uploader('Planilha Combustível Interno (.csv ou .xlsx)', type=['csv', 'xlsx'], key="up3")
+    uploaded_base1 = st.file_uploader('Base 1 – Abastecimento Externo (.csv ou .xlsx)', type=['csv', 'xlsx'])
+    uploaded_base2 = st.file_uploader('Base 2 – Abastecimento Interno (.csv ou .xlsx)', type=['csv', 'xlsx'])
+    uploaded_base_combustivel = st.file_uploader('Base 3 – Valor Gasto Combustível Interno (.csv ou .xlsx)', type=['csv', 'xlsx'])
 
-    if uploaded_base1 and uploaded_base2 and uploaded_combustivel:
+    if uploaded_base1 and uploaded_base2 and uploaded_base_combustivel:
         base1 = carregar_base(uploaded_base1, 'Base 1 (Externo)')
         base2 = carregar_base(uploaded_base2, 'Base 2 (Interno)')
-        combustivel = carregar_base(uploaded_combustivel, 'Combustível Interno')
+        base_combustivel = carregar_base(uploaded_base_combustivel, 'Base 3 (Combustível Interno)')
 
-        if base1 is not None and base2 is not None and combustivel is not None:
-
-            # Remove linhas com placa "Entrada Posto Interno" da base2
-            base2['Placa'] = base2['Placa'].astype(str).str.strip()
-            base2 = base2[base2['Placa'] != '-']  # Remove a linha que tinha '-'
-            base2 = base2[base2['Placa'].str.upper() != 'ENTRADA POSTO INTERNO']  # Garantir remover esse texto se tiver
-
-            # Data
+        if base1 is not None and base2 is not None and base_combustivel is not None:
+            # Datas
             base1['data'] = pd.to_datetime(base1['DATA'], dayfirst=True, errors='coerce')
             base2['data'] = pd.to_datetime(base2['Data'], dayfirst=True, errors='coerce')
-            combustivel['data'] = None
-            # Tentar detectar nome da coluna data em combustivel:
-            for col in ['Data', 'DATA', 'data']:
-                if col in combustivel.columns:
-                    combustivel['data'] = pd.to_datetime(combustivel[col], dayfirst=True, errors='coerce')
-                    break
+            base_combustivel['data'] = pd.to_datetime(base_combustivel['Data'], dayfirst=True, errors='coerce')
 
-            # Placa
+            # Padronizar placas
             base1['placa'] = base1['PLACA'].astype(str).str.replace(' ', '').str.upper()
             base2['placa'] = base2['Placa'].astype(str).str.replace(' ', '').str.upper()
-            if 'Placa' in combustivel.columns:
-                combustivel['placa'] = combustivel['Placa'].astype(str).str.replace(' ', '').str.upper()
-            else:
-                combustivel['placa'] = None
+            base_combustivel['placa'] = base_combustivel['Placa'].astype(str).str.replace(' ', '').str.upper()
 
+            # Tratar litros e KM
             base1['litros'] = base1['CONSUMO'].apply(tratar_litros)
             base1['km_atual'] = pd.to_numeric(base1['KM ATUAL'], errors='coerce')
 
             base2['litros'] = pd.to_numeric(base2['Quantidade de litros'], errors='coerce')
             base2['km_atual'] = pd.to_numeric(base2['KM Atual'], errors='coerce')
 
-            # Tratar coluna valor pago combustível interno (de combustivel)
-            valor_combustivel_int = 0.0
-            # Procura colunas com nomes próximos ao valor pago
-            for col in combustivel.columns:
-                if col.lower() in ['valor', 'valor pago', 'valor pago combustivel', 'valor pago interno', 'valor pago combustível']:
-                    combustivel['valor_pago'] = combustivel[col].apply(tratar_valor)
-                    valor_combustivel_int = combustivel['valor_pago'].sum()
-                    break
-            else:
-                # Se não achou coluna, tentar a primeira numérica
-                for col in combustivel.columns:
-                    if pd.api.types.is_numeric_dtype(combustivel[col]):
-                        combustivel['valor_pago'] = combustivel[col]
-                        valor_combustivel_int = combustivel[col].sum()
-                        break
+            base_combustivel['valor'] = base_combustivel['Valor Pago'].apply(tratar_valor)
 
-            # Mostrar apenas uma vez as infos base carregadas (compacto, lado a lado)
-            col1, col2, col3 = st.columns([1,1,1])
+            # Filtros de data e combustível
+            col1, col2, col3 = st.columns([1,1,2])
             with col1:
-                st.markdown(f"**Base 1 (Externo):** {len(base1):,} linhas")
+                start_date = pd.to_datetime(st.date_input('Data inicial', value=pd.to_datetime('2025-01-01')))
             with col2:
-                st.markdown(f"**Base 2 (Interno):** {len(base2):,} linhas")
+                end_date = pd.to_datetime(st.date_input('Data final', value=pd.to_datetime('2025-12-31')))
             with col3:
-                st.markdown(f"**Combustível Int.:** {len(combustivel):,} linhas")
-
-            # Filtros na mesma linha
-            fcol1, fcol2, fcol3 = st.columns([1,1,2])
-            with fcol1:
-                start_date = st.date_input('Data inicial', value=pd.to_datetime('2025-01-01'))
-            with fcol2:
-                end_date = st.date_input('Data final', value=pd.to_datetime('2025-12-31'))
-            with fcol3:
-                filtro_combustivel = None
+                descricao_abastecimento = []
                 if 'DESCRIÇÃO DO ABASTECIMENTO' in base1.columns:
-                    combustiveis = base1['DESCRIÇÃO DO ABASTECIMENTO'].dropna().unique().tolist()
-                    filtro_combustivel = st.selectbox("Tipo Combustível (Externo)", ["Todos"] + sorted(combustiveis))
+                    descricao_abastecimento = base1['DESCRIÇÃO DO ABASTECIMENTO'].dropna().unique().tolist()
+                filtro_descricao = None
+                if descricao_abastecimento:
+                    filtro_descricao = st.selectbox(
+                        "Tipo de Combustível (Externo)",
+                        ["Todos"] + sorted(descricao_abastecimento),
+                        key="combustivel"
+                    )
+                    if filtro_descricao and filtro_descricao != "Todos":
+                        base1 = base1[base1['DESCRIÇÃO DO ABASTECIMENTO'] == filtro_descricao]
 
             if start_date > end_date:
-                st.error("Data inicial deve ser menor ou igual à final.")
+                st.error("Data inicial deve ser menor ou igual à data final.")
                 return
 
-            base1 = base1[(base1['data'] >= pd.Timestamp(start_date)) & (base1['data'] <= pd.Timestamp(end_date))]
-            base2 = base2[(base2['data'] >= pd.Timestamp(start_date)) & (base2['data'] <= pd.Timestamp(end_date))]
-            combustivel = combustivel[(combustivel['data'] >= pd.Timestamp(start_date)) & (combustivel['data'] <= pd.Timestamp(end_date))]
-
-            if filtro_combustivel and filtro_combustivel != "Todos":
-                base1 = base1[base1['DESCRIÇÃO DO ABASTECIMENTO'] == filtro_combustivel]
+            # Aplicar filtros de datas
+            base1 = base1[(base1['data'] >= start_date) & (base1['data'] <= end_date)]
+            base2 = base2[(base2['data'] >= start_date) & (base2['data'] <= end_date)]
+            base_combustivel = base_combustivel[(base_combustivel['data'] >= start_date) & (base_combustivel['data'] <= end_date)]
 
             litros_ext = base1['litros'].sum()
             litros_int = base2['litros'].sum()
@@ -139,38 +106,70 @@ def main():
             if 'CUSTO TOTAL' in base1.columns:
                 valor_ext = base1['CUSTO TOTAL'].apply(tratar_valor).sum()
 
-            abas = st.tabs(["Resumo", "Top 10", "Consumo Médio"])
+            valor_combustivel_int = base_combustivel['valor'].sum()
 
+            abas = st.tabs(["📊 Resumo Geral", "🚛 Top 10 Abastecimentos", "⛽ Consumo Médio"])
+
+            # ABA 1 - RESUMO GERAL
             with abas[0]:
                 st.subheader(f'Período: {start_date.strftime("%d/%m/%Y")} a {end_date.strftime("%d/%m/%Y")}')
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    st.metric('Litros Externo', f'{litros_ext:,.2f} L')
-                    st.metric('Valor Gasto Ext.', f'R$ {valor_ext:,.2f}')
-                    st.metric('% Externo', f'{perc_ext:.1f}%')
-                with c2:
-                    st.metric('Litros Interno', f'{litros_int:,.2f} L')
-                    st.metric('% Interno', f'{perc_int:.1f}%')
-                with c3:
-                    st.metric('Valor Gasto Combustível Int.', f'R$ {valor_combustivel_int:,.2f}')
+                c1, c2, c3, c4 = st.columns(4)
 
+                with c1:
+                    st.markdown("### Litros Externo")
+                    st.markdown(f"<h2 style='color:#0072B2'>{litros_ext:,.2f} L</h2>", unsafe_allow_html=True)
+                    st.markdown(f"<span style='color:gray'>% Externo: {perc_ext:.1f}%</span>", unsafe_allow_html=True)
+
+                with c2:
+                    st.markdown("### Valor Gasto Ext.")
+                    st.markdown(f"<h2 style='color:#D55E00'>R$ {valor_ext:,.2f}</h2>", unsafe_allow_html=True)
+                    st.markdown("<br>", unsafe_allow_html=True)
+
+                with c3:
+                    st.markdown("### Litros Interno")
+                    st.markdown(f"<h2 style='color:#009E73'>{litros_int:,.2f} L</h2>", unsafe_allow_html=True)
+                    st.markdown(f"<span style='color:gray'>% Interno: {perc_int:.1f}%</span>", unsafe_allow_html=True)
+
+                with c4:
+                    st.markdown("### Valor Gasto Combustível Int.")
+                    st.markdown(f"<h2 style='color:#CC79A7'>R$ {valor_combustivel_int:,.2f}</h2>", unsafe_allow_html=True)
+                    st.markdown("<br>", unsafe_allow_html=True)
+
+                # Gráfico pizza
+                fig_pizza = go.Figure(data=[go.Pie(
+                    labels=["Abastecimento Externo", "Abastecimento Interno"],
+                    values=[litros_ext, litros_int],
+                    hole=0.4,
+                    marker=dict(colors=['#0072B2', '#009E73']),
+                    hoverinfo='label+percent',
+                    textinfo='value'
+                )])
+                fig_pizza.update_layout(
+                    margin=dict(t=0, b=0, l=0, r=0),
+                    height=350,
+                    showlegend=True
+                )
+                st.plotly_chart(fig_pizza, use_container_width=True)
+
+            # ABA 2 - TOP 10 ABASTECIMENTOS
             with abas[1]:
-                st.subheader('Top 10 Abastecimentos')
+                st.subheader('Top 10 veículos com mais litros abastecidos')
 
                 top_ext = base1.groupby('placa')['litros'].sum().sort_values(ascending=False).head(10).reset_index()
-                top_ext.columns = ['Veículo', 'Litros']
-                fig_ext = px.bar(top_ext, x='Veículo', y='Litros', color='Litros', 
-                                 color_continuous_scale='Blues', title='Externo')
+                top_ext.columns = ['Placa', 'Litros']
+                fig_ext = px.bar(top_ext, x='Placa', y='Litros', title='Top 10 Abastecimentos Externos',
+                                 labels={'Placa': 'Placa', 'Litros': 'Litros'}, color='Litros', color_continuous_scale='Blues')
                 st.plotly_chart(fig_ext, use_container_width=True)
                 st.dataframe(top_ext.style.format({'Litros': '{:,.2f}'}))
 
                 top_int = base2.groupby('placa')['litros'].sum().sort_values(ascending=False).head(10).reset_index()
-                top_int.columns = ['Veículo', 'Litros']
-                fig_int = px.bar(top_int, x='Veículo', y='Litros', color='Litros',
-                                 color_continuous_scale='Greens', title='Interno')
+                top_int.columns = ['Placa', 'Litros']
+                fig_int = px.bar(top_int, x='Placa', y='Litros', title='Top 10 Abastecimentos Internos',
+                                 labels={'Placa': 'Placa', 'Litros': 'Litros'}, color='Litros', color_continuous_scale='Greens')
                 st.plotly_chart(fig_int, use_container_width=True)
                 st.dataframe(top_int.style.format({'Litros': '{:,.2f}'}))
 
+            # ABA 3 - CONSUMO MÉDIO
             with abas[2]:
                 df_combined = pd.concat([
                     base1[['placa', 'data', 'km_atual', 'litros']],
@@ -188,14 +187,21 @@ def main():
                 consumo_medio['km_por_litro'] = 1 / consumo_medio['consumo_por_km']
                 consumo_medio = consumo_medio[['placa', 'km_por_litro']].sort_values('km_por_litro', ascending=False)
 
-                st.subheader('Consumo Médio (Km/L)')
-                fig_consumo = px.bar(consumo_medio, x='placa', y='km_por_litro', color='km_por_litro',
-                                    color_continuous_scale='Purples', labels={'placa': 'Veículo', 'km_por_litro': 'Km/L'})
+                st.subheader('Consumo Médio por Veículo (Km/L)')
+                fig_consumo = px.bar(
+                    consumo_medio,
+                    x='placa',
+                    y='km_por_litro',
+                    title='Consumo Médio por Veículo (Km/L)',
+                    labels={'placa': 'Placa', 'km_por_litro': 'Km/L'},
+                    color='km_por_litro',
+                    color_continuous_scale='Purples'
+                )
                 st.plotly_chart(fig_consumo, use_container_width=True)
                 st.dataframe(consumo_medio.style.format({'km_por_litro': '{:.2f}'}))
 
         else:
-            st.warning('Não foi possível processar as bases. Verifique os dados.')
+            st.warning('Não foi possível processar uma das bases. Verifique os dados.')
 
     else:
         st.info('Envie as três bases (.csv ou .xlsx) para gerar o relatório.')
