@@ -98,57 +98,31 @@ def main():
     df_int = df_int[(df_int['DATA'].dt.date >= ini) & (df_int['DATA'].dt.date <= fim)]
     df_val = df_val[(df_val['DATA'].dt.date >= ini) & (df_val['DATA'].dt.date <= fim)]
 
-    # Coluna combustível na base externa
+    # Coluna de descrição combustível na base externa
     combustivel_col = next((col for col in df_ext.columns if 'DESCRIÇÃO' in col or 'DESCRI' in col), None)
 
-    # Normalizar colunas
-    df_ext['PLACA'] = df_ext['PLACA'].astype(str).str.upper().str.strip()
-    df_int['PLACA'] = df_int['PLACA'].astype(str).str.upper().str.strip()
-
-    # Converter colunas numéricas
-    df_ext['KM ATUAL'] = pd.to_numeric(df_ext.get('KM ATUAL'), errors='coerce')
-    df_ext['CUSTO TOTAL'] = df_ext['CUSTO TOTAL'].apply(tratar_valor)
-    df_int['KM ATUAL'] = pd.to_numeric(df_int.get('KM ATUAL'), errors='coerce')
-    df_int['QUANTIDADE DE LITROS'] = pd.to_numeric(df_int.get('QUANTIDADE DE LITROS'), errors='coerce').fillna(0.0)
-
-    # Coluna valor total da base combustível
-    val_col = next((c for c in df_val.columns if 'VALOR' in c), None)
-    if val_col:
-        df_val['VALOR_TOTAL'] = df_val[val_col].apply(tratar_valor)
-    else:
-        st.warning("Coluna 'Valor Total' não encontrada na base de valores.")
-        df_val['VALOR_TOTAL'] = 0.0
-
-    # Inicializar seleção combustível completa
-    combustiveis_selecionados = []
-    if combustivel_col:
-        tipos_combustivel = sorted(df_ext[combustivel_col].dropna().unique())
-        combustiveis_selecionados = tipos_combustivel.copy()
-
-    # Tabs para visualização
+    # --- ABA RESUMO ---
     tab1, tab2, tab3 = st.tabs(['✔️ Resumo', '🔝 Top 10', '🔍 Consumo Médio'])
 
     with tab1:
         st.subheader(f'Período: {ini.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")}')
 
-        # Filtro em expander para economizar espaço e lista com checkbox por coluna
+        # Filtro de combustível com selectbox dentro de expander recolhível
         with st.expander("🔍 Filtrar por Tipo de Combustível (Externo)", expanded=False):
             if combustivel_col:
-                cols = st.columns(3)
-                selecionados = []
-                for i, comb in enumerate(tipos_combustivel):
-                    if cols[i % 3].checkbox(comb, value=comb in combustiveis_selecionados):
-                        selecionados.append(comb)
-                if selecionados:
-                    df_ext = df_ext[df_ext[combustivel_col].isin(selecionados)]
+                tipos_combustivel = sorted(df_ext[combustivel_col].dropna().unique())
+                combustivel_selecionado = st.selectbox('Selecione o combustível:', ['Todos'] + tipos_combustivel, index=0)
+                if combustivel_selecionado != 'Todos':
+                    df_ext_filtrado = df_ext[df_ext[combustivel_col] == combustivel_selecionado]
                 else:
-                    st.warning('Nenhum tipo de combustível selecionado. Mostrando todos.')
+                    df_ext_filtrado = df_ext.copy()
             else:
                 st.warning('Coluna de descrição do combustível não encontrada na base externa.')
+                df_ext_filtrado = df_ext.copy()
 
-        # Recalcular KPIs após filtro combustível
-        litros_ext = df_ext['LITROS'].sum()
-        valor_ext = df_ext['CUSTO TOTAL'].sum()
+        # Recalcular KPIs após filtro
+        litros_ext = df_ext_filtrado['LITROS'].sum()
+        valor_ext = df_ext_filtrado['CUSTO TOTAL'].sum()
         litros_int = df_int['QUANTIDADE DE LITROS'].sum()
         valor_int = df_val['VALOR_TOTAL'].sum()
 
@@ -168,8 +142,7 @@ def main():
             'Interno': [litros_int, valor_int]
         }).melt(id_vars='Métrica', var_name='Tipo', value_name='Valor')
 
-        # Cores: Azul escuro e cinza
-        colors = {'Externo': '#264653', 'Interno': '#7f8c8d'}
+        colors = {'Externo': '#1f77b4', 'Interno': '#ff7f0e'}  # Azul e laranja para contraste
 
         fig = px.bar(
             df_kpi,
@@ -182,24 +155,21 @@ def main():
             orientation='h'
         )
         fig.update_traces(marker_line_width=0, textposition='outside', textfont_size=14)
-
-        # Mostrar total geral no título
-        total_geral = litros_ext + litros_int + valor_ext + valor_int
-        titulo = f'Comparativo Externo vs Interno — Total geral: {total_geral:,.2f}'
-
         fig.update_layout(
-            title=titulo,
+            title='Comparativo Externo vs Interno',
             title_font_size=22,
             xaxis_title='Valor',
             yaxis_title='Métrica',
             yaxis=dict(categoryorder='array', categoryarray=['Litros', 'Custo']),
-            plot_bgcolor='white',
+            plot_bgcolor='#f0f0f0',  # fundo cinza claro
+            paper_bgcolor='#f0f0f0',
             margin=dict(t=60, b=50, l=100, r=40),
             legend_title_text='Tipo',
             xaxis=dict(showgrid=True, gridcolor='LightGray')
         )
         st.plotly_chart(fig, use_container_width=True)
 
+    # --- ABA TOP 10 ---
     with tab2:
         st.subheader('🔝 Top 10 Veículos por Litros Abastecidos')
 
@@ -219,10 +189,10 @@ def main():
             fig2.update_layout(yaxis={'categoryorder': 'total ascending'})
             st.plotly_chart(fig2, use_container_width=True)
 
+    # --- ABA CONSUMO MÉDIO ---
     with tab3:
         st.subheader('🔍 Consumo Médio (Km/L)')
 
-        # Preparar dados para consumo médio
         df_comb = pd.concat([
             df_ext[['PLACA', 'DATA', 'KM ATUAL', 'LITROS']].rename(columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'LITROS': 'litros'}),
             df_int[['PLACA', 'DATA', 'KM ATUAL', 'QUANTIDADE DE LITROS']].rename(columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'QUANTIDADE DE LITROS': 'litros'})
