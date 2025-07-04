@@ -98,22 +98,35 @@ def main():
     df_int = df_int[(df_int['DATA'].dt.date >= ini) & (df_int['DATA'].dt.date <= fim)]
     df_val = df_val[(df_val['DATA'].dt.date >= ini) & (df_val['DATA'].dt.date <= fim)]
 
-    # Filtro por tipo de combustível (base externa) - botão seleção único, compacto
+    # Filtro por tipo de combustível (base externa) - botão seleção único, compacto, sem nan
     combustivel_col = next((col for col in df_ext.columns if 'DESCRIÇÃO' in col or 'DESCRI' in col), None)
-    tipos_combustivel = []
     combustiveis_selecionados = []
 
     if combustivel_col:
         df_ext[combustivel_col] = df_ext[combustivel_col].astype(str).str.strip()
-        tipos_combustivel = sorted(df_ext[combustivel_col].dropna().unique())
-        # Botão de seleção único (radio) para filtro compacto
+        # Remover 'nan' ou valores vazios do filtro
+        tipos_combustivel = sorted([x for x in df_ext[combustivel_col].dropna().unique() if x.lower() != 'nan' and x != ''])
         combustivel_escolhido = st.radio(
             '🔍 Filtrar por Tipo de Combustível (Externo)',
             options=tipos_combustivel,
             index=0,
             horizontal=True
         )
+        # Filtra base externa pelo combustível escolhido
         df_ext = df_ext[df_ext[combustivel_col] == combustivel_escolhido]
+
+        # Filtra base interna para o mesmo tipo de combustível
+        # Tentamos identificar a coluna equivalente na base interna
+        tipo_combustivel_int_col = next((col for col in df_int.columns if 'TIPO' in col or 'DESCRI' in col), None)
+        if tipo_combustivel_int_col:
+            df_int[tipo_combustivel_int_col] = df_int[tipo_combustivel_int_col].astype(str).str.strip()
+            # Para comparação, padronizamos para maiúsculas e removemos espaços
+            filtro_int = df_int[tipo_combustivel_int_col].str.upper() == combustivel_escolhido.upper()
+            df_int = df_int[filtro_int]
+        else:
+            # Se não tiver coluna para tipo de combustível na interna, filtrar somente por placa que aparece na externa (opcional)
+            placas_validas = df_ext['PLACA'].unique()
+            df_int = df_int[df_int['PLACA'].isin(placas_validas)]
     else:
         st.warning('Coluna de descrição do combustível não encontrada na base externa.')
 
@@ -135,11 +148,21 @@ def main():
         st.warning("Coluna 'Valor Total' não encontrada na base de valores.")
         df_val['VALOR_TOTAL'] = 0.0
 
-    # Somar KPIs
+    # Somar KPIs para cálculo correto, comparando apenas o combustível selecionado
     litros_ext = df_ext['LITROS'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
-    litros_int = df_int['QUANTIDADE DE LITROS'].sum()
-    valor_int = df_val['VALOR_TOTAL'].sum()
+
+    # Para base interna e valores, filtrar para o mesmo tipo de combustível
+    if combustivel_col and tipo_combustivel_int_col:
+        # Já filtramos df_int acima para mesmo tipo de combustível, assim:
+        litros_int = df_int['QUANTIDADE DE LITROS'].sum()
+        # Para valor interno, precisamos filtrar df_val para placas internas filtradas
+        placas_int = df_int['PLACA'].unique()
+        df_val_filtrado = df_val[df_val['PLACA'].isin(placas_int)]
+        valor_int = df_val_filtrado['VALOR_TOTAL'].sum()
+    else:
+        litros_int = df_int['QUANTIDADE DE LITROS'].sum()
+        valor_int = df_val['VALOR_TOTAL'].sum()
 
     total_litros = litros_ext + litros_int
     perc_ext = (litros_ext / total_litros * 100) if total_litros > 0 else 0
@@ -185,7 +208,7 @@ def main():
         fig.update_traces(marker_line_width=1.5, marker_line_color='white', textfont_size=14)
         fig.update_layout(
             title_font_size=20,
-            plot_bgcolor='rgba(0,0,0,0)',  # fundo transparente
+            plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             yaxis=dict(showgrid=True, gridcolor='lightgray')
         )
@@ -231,9 +254,14 @@ def main():
 
         consumo_medio = df_comb.groupby('placa')['consumo'].mean().reset_index().rename(columns={'consumo': 'Km/L'})
 
-        fig3 = px.bar(consumo_medio, x='Km/L', y='placa', orientation='h', color='Km/L',
-                      color_continuous_scale='Viridis', text_auto='.2f', title='Eficiência por Veículo')
-        fig3.update_layout(yaxis={'categoryorder': 'total ascending'})
+        # Melhorias no gráfico: ordenar barras decrescente e usar cores fixas
+        fig3 = px.bar(
+            consumo_medio.sort_values('Km/L', ascending=False),
+            x='Km/L', y='placa', orientation='h', color='Km/L',
+            color_continuous_scale='Viridis', text_auto='.2f', title='Eficiência por Veículo'
+        )
+        fig3.update_layout(yaxis={'categoryorder': 'total descending'})
+        fig3.update_traces(textfont_size=12)
         st.plotly_chart(fig3, use_container_width=True)
 
 if __name__ == '__main__':
