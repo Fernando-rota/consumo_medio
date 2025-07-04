@@ -61,7 +61,7 @@ def main():
     with d2:
         fim = st.date_input('Data final', value=date(2025,12,31))
 
-    # Converter colunas de data e filtrar
+    # Converter e filtrar datas
     df_ext['data'] = pd.to_datetime(df_ext['DATA'], dayfirst=True, errors='coerce').dt.date
     df_int['data'] = pd.to_datetime(df_int['Data'], dayfirst=True, errors='coerce').dt.date
     col_dt = next((c for c in df_val.columns if 'dt' in c.lower() or 'data' in c.lower()), None)
@@ -73,7 +73,21 @@ def main():
     mask_ext = (df_ext['data'] >= ini) & (df_ext['data'] <= fim)
     mask_int = (df_int['data'] >= ini) & (df_int['data'] <= fim)
     mask_val = (df_val['data'] >= ini) & (df_val['data'] <= fim)
-    df_ext, df_int, df_val = df_ext[mask_ext], df_int[mask_int], df_val[mask_val]
+    df_ext = df_ext[mask_ext]
+    df_int = df_int[mask_int]
+    df_val = df_val[mask_val]
+
+    # Criar coluna placa em ambos
+    if 'PLACA' in df_ext.columns:
+        df_ext['placa'] = df_ext['PLACA'].astype(str).str.upper().str.strip()
+    else:
+        st.error('Coluna PLACA não encontrada em Externo.')
+        return
+    if 'Placa' in df_int.columns:
+        df_int['placa'] = df_int['Placa'].astype(str).str.upper().str.strip()
+    else:
+        st.error('Coluna Placa não encontrada em Interno.')
+        return
 
     # Tratar valores e litros
     df_ext['litros'] = df_ext['CONSUMO'].apply(tratar_litros)
@@ -88,11 +102,13 @@ def main():
 
     tabs = st.tabs(['Resumo', 'Top10', 'Consumo'])
 
-    # Aba Resumo: dois KPIs empilhados
+    # Aba Resumo: dois KPIs empilhados um abaixo do outro
     with tabs[0]:
         st.subheader(f'Resumo {ini.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")}')
-        st.metric('Externo: Litros / Valor', f'{litros_ext:,.2f} L / R$ {valor_ext:,.2f}')
-        st.metric('Interno: Litros / Valor', f'{litros_int:,.2f} L / R$ {valor_int:,.2f}')
+        st.metric(label='Externo: Litros', value=f'{litros_ext:,.2f} L')
+        st.metric(label='Externo: Valor', value=f'R$ {valor_ext:,.2f}')
+        st.metric(label='Interno: Litros', value=f'{litros_int:,.2f} L')
+        st.metric(label='Interno: Valor', value=f'R$ {valor_int:,.2f}')
 
     # Top10 Litros
     with tabs[1]:
