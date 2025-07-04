@@ -125,7 +125,7 @@ def main():
     tab1, tab2, tab3 = st.tabs(['✔️ Resumo', '🔝 Top 10', '🔍 Consumo Médio'])
 
     with tab1:
-        st.subheader(f'Período: {ini.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")})
+        st.subheader(f'Período: {ini.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")}')
         c1, c2, c3, c4 = st.columns(4)
         c1.metric('⛽ Litros Ext.', f'{litros_ext:,.2f} L', delta=f'{perc_ext:.1f}%')
         c2.metric('💰 Custo Ext.', f'R$ {valor_ext:,.2f}')
