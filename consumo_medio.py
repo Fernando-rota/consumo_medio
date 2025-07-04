@@ -58,8 +58,18 @@ def main():
         st.error("Coluna 'CONSUMO' não encontrada na base externa.")
         return
 
-    df_ext['DATA'] = pd.to_datetime(df_ext['DATA'], dayfirst=True, errors='coerce')
-    df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
+    col_data_ext = next((c for c in df_ext.columns if 'DATA' in c), None)
+    if not col_data_ext:
+        st.error("Coluna de data não encontrada na base Externa.")
+        return
+    df_ext['DATA'] = pd.to_datetime(df_ext[col_data_ext], dayfirst=True, errors='coerce')
+
+    col_data_int = next((c for c in df_int.columns if 'DATA' in c), None)
+    if not col_data_int:
+        st.error("Coluna de data não encontrada na base Interna.")
+        return
+    df_int['DATA'] = pd.to_datetime(df_int[col_data_int], dayfirst=True, errors='coerce')
+
     df_val['DATA'] = pd.to_datetime(df_val[next((c for c in df_val.columns if 'DATA' in c), 'DATA')], dayfirst=True, errors='coerce')
 
     df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
