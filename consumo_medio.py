@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title='Relatório de Abastecimento Interno x Externo', layout='wide', locale="pt_BR")
+st.set_page_config(page_title='Relatório de Abastecimento Interno x Externo', layout='wide')
 
 def carregar_base(uploaded_file, tipo_base):
     try:
