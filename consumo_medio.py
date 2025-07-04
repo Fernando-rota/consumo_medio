@@ -52,7 +52,7 @@ if not (up_ext and up_int and up_val):
 df_ext = carregar_base(up_ext, 'Externo')
 df_int = carregar_base(up_int, 'Interno')
 df_val = carregar_base(up_val, 'Valor Comb. Int.')
-if None in (df_ext, df_int, df_val):
+if df_ext is None or df_int is None or df_val is None:
     st.stop()
 
 # Seleção de período com slider de datas
