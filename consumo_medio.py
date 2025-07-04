@@ -26,12 +26,16 @@ def carregar_base(uploaded_file, nome):
 # Conversão de valores
 
 def tratar_litros(x):
-    try: return float(str(x).replace('.', '').replace(',', '.'))
-    except: return 0.0
+    try:
+        return float(str(x).replace('.', '').replace(',', '.'))
+    except:
+        return 0.0
 
 def tratar_valor(x):
-    try: return float(str(x).replace('R$', '').replace('.', '').replace(',', '.'))
-    except: return 0.0
+    try:
+        return float(str(x).replace('R$', '').replace('.', '').replace(',', '.'))
+    except:
+        return 0.0
 
 # App
 
@@ -39,10 +43,10 @@ def main():
     st.title('Abastecimento Externo x Interno')
 
     # Uploads em linha
-    u1, u2, u3 = st.columns(3)
-    up_ext = u1.file_uploader('Externo', type=['csv','xlsx'])
-    up_int = u2.file_uploader('Interno', type=['csv','xlsx'])
-    up_val = u3.file_uploader('Valor Comb. Int.', type=['csv','xlsx'])
+    u_ext, u_int, u_val = st.columns(3)
+    up_ext = u_ext.file_uploader('Externo', type=['csv','xlsx'])
+    up_int = u_int.file_uploader('Interno', type=['csv','xlsx'])
+    up_val = u_val.file_uploader('Valor Comb. Int.', type=['csv','xlsx'])
     if up_ext is None or up_int is None or up_val is None:
         st.info('Envie as três bases antes de prosseguir.')
         return
@@ -53,13 +57,10 @@ def main():
     if df_ext is None or df_int is None or df_val is None:
         return
 
-    # Datas no formato brasileiro
-    from datetime import date
-    d1, d2 = st.columns(2)
-    with d1:
-        ini = st.date_input('Data inicial', value=date(2025,1,1))
-    with d2:
-        fim = st.date_input('Data final', value=date(2025,12,31))
+    # Período interativo
+    inicio, fim = st.date_input('Selecione o período', value=(pd.to_datetime('2025-01-01'), pd.to_datetime('2025-12-31')))
+    inicio = pd.to_datetime(inicio).date()
+    fim = pd.to_datetime(fim).date()
 
     # Converter e filtrar datas
     df_ext['data'] = pd.to_datetime(df_ext['DATA'], dayfirst=True, errors='coerce').dt.date
@@ -70,14 +71,11 @@ def main():
         return
     df_val['data'] = pd.to_datetime(df_val[col_dt], dayfirst=True, errors='coerce').dt.date
 
-    mask_ext = (df_ext['data'] >= ini) & (df_ext['data'] <= fim)
-    mask_int = (df_int['data'] >= ini) & (df_int['data'] <= fim)
-    mask_val = (df_val['data'] >= ini) & (df_val['data'] <= fim)
-    df_ext = df_ext[mask_ext]
-    df_int = df_int[mask_int]
-    df_val = df_val[mask_val]
+    df_ext = df_ext[(df_ext['data'] >= inicio) & (df_ext['data'] <= fim)]
+    df_int = df_int[(df_int['data'] >= inicio) & (df_int['data'] <= fim)]
+    df_val = df_val[(df_val['data'] >= inicio) & (df_val['data'] <= fim)]
 
-    # Criar coluna placa em ambos
+    # Criar coluna placa
     if 'PLACA' in df_ext.columns:
         df_ext['placa'] = df_ext['PLACA'].astype(str).str.upper().str.strip()
     else:
@@ -94,7 +92,7 @@ def main():
     df_int['litros'] = pd.to_numeric(df_int['Quantidade de litros'], errors='coerce')
     df_val['valor'] = df_val['Valor Total'].apply(tratar_valor)
 
-    # Cálculos
+    # Cálculos resumo
     litros_ext = df_ext['litros'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].apply(tratar_valor).sum() if 'CUSTO TOTAL' in df_ext.columns else 0
     litros_int = df_int['litros'].sum()
@@ -102,13 +100,17 @@ def main():
 
     tabs = st.tabs(['Resumo', 'Top10', 'Consumo'])
 
-    # Aba Resumo: dois KPIs empilhados um abaixo do outro
+    # Aba Resumo: gráfico comparativo
     with tabs[0]:
-        st.subheader(f'Resumo {ini.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")}')
-        st.metric(label='Externo: Litros', value=f'{litros_ext:,.2f} L')
-        st.metric(label='Externo: Valor', value=f'R$ {valor_ext:,.2f}')
-        st.metric(label='Interno: Litros', value=f'{litros_int:,.2f} L')
-        st.metric(label='Interno: Valor', value=f'R$ {valor_int:,.2f}')
+        st.subheader(f'Resumo de {inicio.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")}')
+        df_kpi = pd.DataFrame({
+            'Tipo': ['Externo', 'Interno'],
+            'Litros': [litros_ext, litros_int],
+            'Valor (R$)': [valor_ext, valor_int]
+        })
+        fig_kpi = px.bar(df_kpi, x='Tipo', y=['Litros', 'Valor (R$)'], barmode='group', text_auto=True,
+                         labels={'value': 'Quantidade', 'variable': 'Métrica'})
+        st.plotly_chart(fig_kpi, use_container_width=True)
 
     # Top10 Litros
     with tabs[1]:
@@ -124,8 +126,8 @@ def main():
         df = df.sort_values(['placa','data']).reset_index(drop=True)
         df['prev'] = df.groupby('placa')['litros'].shift(1)
         df['consumo'] = df['litros'] / df['prev']
-        cm = df.groupby('placa')['consumo'].mean().reset_index().rename(columns={'consumo':'média'})
-        st.plotly_chart(px.bar(cm, x='placa', y='média', title='Consumo Médio'), use_container_width=True)
+        cm = df.groupby('placa')['consumo'].mean().reset_index().rename(columns={'consumo':'Média Km/L'})
+        st.plotly_chart(px.bar(cm, x='placa', y='Média Km/L', title='Consumo Médio'), use_container_width=True)
 
 if __name__=='__main__':
     main()
