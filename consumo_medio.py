@@ -103,7 +103,6 @@ def main():
     val_col = next((c for c in df_val.columns if 'VALOR' in c), None)
     df_val['VALOR_TOTAL'] = df_val[val_col].apply(tratar_valor) if val_col else 0.0
 
-    # Filtro por placa geral
     placas = sorted(set(df_ext['PLACA'].unique()).union(df_int['PLACA'].unique()))
     placa_filtro = st.selectbox('🚗 Filtrar por Veículo (opcional):', options=['Todos'] + placas)
     if placa_filtro != 'Todos':
@@ -128,12 +127,32 @@ def main():
         c3.metric('⛽ Litros (Interno)', f'{litros_int:,.2f} L', delta=f'{perc_int:.1f}%')
         c4.metric('💸 Custo (Interno)', f'R$ {valor_int:,.2f}')
 
+        df_kpi = pd.DataFrame({
+            'Métrica': ['Litros', 'Custo'],
+            'Externo': [litros_ext, valor_ext],
+            'Interno': [litros_int, valor_int]
+        }).melt(id_vars='Métrica', var_name='Tipo', value_name='Valor')
+
+        fig_resumo = px.bar(
+            df_kpi,
+            x='Métrica',
+            y='Valor',
+            color='Tipo',
+            barmode='group',
+            text_auto='.2s',
+            title='🔎 Comparativo Geral Externo vs Interno'
+        )
+        fig_resumo.update_layout(yaxis_title='', xaxis_title='')
+        st.plotly_chart(fig_resumo, use_container_width=True)
+
     with tab2:
         top_ext = df_ext.groupby('PLACA')['LITROS'].sum().nlargest(10).reset_index()
         top_int = df_int.groupby('PLACA')['QUANTIDADE DE LITROS'].sum().nlargest(10).reset_index()
         col1, col2 = st.columns(2)
-        fig1 = px.bar(top_ext, y='PLACA', x='LITROS', orientation='h', title='🔹 Top 10 Externo')
-        fig2 = px.bar(top_int, y='PLACA', x='QUANTIDADE DE LITROS', orientation='h', title='🟢 Top 10 Interno')
+        fig1 = px.bar(top_ext, y='PLACA', x='LITROS', orientation='h', title='🔹 Top 10 Externo', text_auto='.2f')
+        fig1.update_layout(yaxis_title='', xaxis_title='Litros', yaxis=dict(categoryorder='total ascending'))
+        fig2 = px.bar(top_int, y='PLACA', x='QUANTIDADE DE LITROS', orientation='h', title='🟢 Top 10 Interno', text_auto='.2f')
+        fig2.update_layout(yaxis_title='', xaxis_title='Litros', yaxis=dict(categoryorder='total ascending'))
         col1.plotly_chart(fig1, use_container_width=True)
         col2.plotly_chart(fig2, use_container_width=True)
 
@@ -149,37 +168,32 @@ def main():
 
         consumo_medio = df_comb.groupby('placa')['consumo'].mean().reset_index().rename(columns={'consumo': 'Km/L'})
         consumo_medio['Classificação'] = consumo_medio['Km/L'].apply(classificar_eficiencia)
-
-        fig3 = px.bar(consumo_medio, x='Km/L', y='placa', orientation='h', color='Classificação',
-                      color_discrete_map={
-                          'Econômico': 'green',
-                          'Normal': 'orange',
-                          'Ineficiente': 'red'
-                      },
-                      title='Eficiência Média por Veículo (Km/L)')
-        fig3.update_layout(yaxis={'categoryorder': 'total descending'})
-        st.plotly_chart(fig3, use_container_width=True)
+        consumo_medio = consumo_medio.sort_values(by='Km/L', ascending=False)
+        st.dataframe(consumo_medio, use_container_width=True)
 
     with tab4:
-        # Tendência Mensal
         df_ext['MÊS'] = df_ext['DATA'].dt.to_period('M').astype(str)
         df_int['MÊS'] = df_int['DATA'].dt.to_period('M').astype(str)
+        df_val['MÊS'] = df_val['DATA'].dt.to_period('M').astype(str)
 
         resumo_mes = pd.DataFrame({
-            'Mês': sorted(set(df_ext['MÊS']).union(df_int['MÊS']))
+            'Mês': sorted(set(df_ext['MÊS']).union(df_int['MÊS']).union(df_val['MÊS']))
         })
         resumo_mes['Litros Externo'] = resumo_mes['Mês'].map(df_ext.groupby('MÊS')['LITROS'].sum())
         resumo_mes['Litros Interno'] = resumo_mes['Mês'].map(df_int.groupby('MÊS')['QUANTIDADE DE LITROS'].sum())
+        resumo_mes['Custo Interno Diesel'] = resumo_mes['Mês'].map(df_val.groupby('MÊS')['VALOR_TOTAL'].sum())
 
         fig4 = px.line(resumo_mes, x='Mês', y=['Litros Externo', 'Litros Interno'],
                        markers=True, title='📈 Tendência Mensal de Abastecimento')
         st.plotly_chart(fig4, use_container_width=True)
 
-        # Custo por litro
+        fig5 = px.line(resumo_mes, x='Mês', y='Custo Interno Diesel', markers=True, title='💰 Custo Total Mensal (Diesel Interno)')
+        st.plotly_chart(fig5, use_container_width=True)
+
         df_ext['R$/L'] = df_ext['CUSTO TOTAL'] / df_ext['LITROS']
         custo_mensal = df_ext.groupby('MÊS')['R$/L'].mean().reset_index()
-        fig5 = px.line(custo_mensal, x='MÊS', y='R$/L', markers=True, title='💰 Custo Médio por Litro (Externo)')
-        st.plotly_chart(fig5, use_container_width=True)
+        fig6 = px.line(custo_mensal, x='MÊS', y='R$/L', markers=True, title='💰 Custo Médio por Litro (Externo)')
+        st.plotly_chart(fig6, use_container_width=True)
 
 if __name__ == '__main__':
     main()
