@@ -8,6 +8,26 @@ st.set_page_config(page_title='Relatório de Abastecimento Interno x Externo', l
 def carregar_base(uploaded_file, tipo_base):
     try:
         if uploaded_file.name.lower().endswith('.csv'):
+            # Leitura CSV com detecção de separador
+            try:
+                df = pd.read_csv(uploaded_file, sep=None, engine='python')
+            except Exception:
+                df = pd.read_csv(uploaded_file, sep=';', engine='python')
+        elif uploaded_file.name.lower().endswith(('.xls', '.xlsx')):
+            import openpyxl
+            df = pd.read_excel(uploaded_file, engine='openpyxl')
+        else:
+            st.warning(f"Formato não suportado para {tipo_base}. Use .csv ou .xlsx.")
+            return None
+        # Limpar nomes de colunas
+        df.columns = df.columns.str.strip()
+        st.success(f"{tipo_base} carregada: {len(df):,} linhas")
+        return df
+    except Exception as e:
+        st.error(f"Erro ao carregar {tipo_base}: {e}")
+        return None(uploaded_file, tipo_base):
+    try:
+        if uploaded_file.name.lower().endswith('.csv'):
             # Tenta inferir separador e, em caso de falha, tenta ponto-e-vírgula
             try:
                 df = pd.read_csv(uploaded_file, sep=None, engine='python')
