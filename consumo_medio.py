@@ -43,24 +43,37 @@ def main():
 
     uploaded_base1 = st.file_uploader('Base 1 – Externo (.csv ou .xlsx)', type=['csv', 'xlsx'], key="up1")
     uploaded_base2 = st.file_uploader('Base 2 – Interno (.csv ou .xlsx)', type=['csv', 'xlsx'], key="up2")
+    uploaded_combustivel = st.file_uploader('Planilha Combustível Interno (.csv ou .xlsx)', type=['csv', 'xlsx'], key="up3")
 
-    if uploaded_base1 and uploaded_base2:
+    if uploaded_base1 and uploaded_base2 and uploaded_combustivel:
         base1 = carregar_base(uploaded_base1, 'Base 1 (Externo)')
         base2 = carregar_base(uploaded_base2, 'Base 2 (Interno)')
+        combustivel = carregar_base(uploaded_combustivel, 'Combustível Interno')
 
-        if base1 is not None and base2 is not None:
+        if base1 is not None and base2 is not None and combustivel is not None:
 
-            # Trocar placa '-' no interno para texto descritivo
+            # Remove linhas com placa "Entrada Posto Interno" da base2
             base2['Placa'] = base2['Placa'].astype(str).str.strip()
-            base2.loc[base2['Placa'] == '-', 'Placa'] = 'Entrada Posto Interno'
+            base2 = base2[base2['Placa'] != '-']  # Remove a linha que tinha '-'
+            base2 = base2[base2['Placa'].str.upper() != 'ENTRADA POSTO INTERNO']  # Garantir remover esse texto se tiver
 
             # Data
             base1['data'] = pd.to_datetime(base1['DATA'], dayfirst=True, errors='coerce')
             base2['data'] = pd.to_datetime(base2['Data'], dayfirst=True, errors='coerce')
+            combustivel['data'] = None
+            # Tentar detectar nome da coluna data em combustivel:
+            for col in ['Data', 'DATA', 'data']:
+                if col in combustivel.columns:
+                    combustivel['data'] = pd.to_datetime(combustivel[col], dayfirst=True, errors='coerce')
+                    break
 
             # Placa
             base1['placa'] = base1['PLACA'].astype(str).str.replace(' ', '').str.upper()
             base2['placa'] = base2['Placa'].astype(str).str.replace(' ', '').str.upper()
+            if 'Placa' in combustivel.columns:
+                combustivel['placa'] = combustivel['Placa'].astype(str).str.replace(' ', '').str.upper()
+            else:
+                combustivel['placa'] = None
 
             base1['litros'] = base1['CONSUMO'].apply(tratar_litros)
             base1['km_atual'] = pd.to_numeric(base1['KM ATUAL'], errors='coerce')
@@ -68,12 +81,30 @@ def main():
             base2['litros'] = pd.to_numeric(base2['Quantidade de litros'], errors='coerce')
             base2['km_atual'] = pd.to_numeric(base2['KM Atual'], errors='coerce')
 
+            # Tratar coluna valor pago combustível interno (de combustivel)
+            valor_combustivel_int = 0.0
+            # Procura colunas com nomes próximos ao valor pago
+            for col in combustivel.columns:
+                if col.lower() in ['valor', 'valor pago', 'valor pago combustivel', 'valor pago interno', 'valor pago combustível']:
+                    combustivel['valor_pago'] = combustivel[col].apply(tratar_valor)
+                    valor_combustivel_int = combustivel['valor_pago'].sum()
+                    break
+            else:
+                # Se não achou coluna, tentar a primeira numérica
+                for col in combustivel.columns:
+                    if pd.api.types.is_numeric_dtype(combustivel[col]):
+                        combustivel['valor_pago'] = combustivel[col]
+                        valor_combustivel_int = combustivel[col].sum()
+                        break
+
             # Mostrar apenas uma vez as infos base carregadas (compacto, lado a lado)
-            col1, col2 = st.columns([1,1])
+            col1, col2, col3 = st.columns([1,1,1])
             with col1:
                 st.markdown(f"**Base 1 (Externo):** {len(base1):,} linhas")
             with col2:
                 st.markdown(f"**Base 2 (Interno):** {len(base2):,} linhas")
+            with col3:
+                st.markdown(f"**Combustível Int.:** {len(combustivel):,} linhas")
 
             # Filtros na mesma linha
             fcol1, fcol2, fcol3 = st.columns([1,1,2])
@@ -93,6 +124,7 @@ def main():
 
             base1 = base1[(base1['data'] >= pd.Timestamp(start_date)) & (base1['data'] <= pd.Timestamp(end_date))]
             base2 = base2[(base2['data'] >= pd.Timestamp(start_date)) & (base2['data'] <= pd.Timestamp(end_date))]
+            combustivel = combustivel[(combustivel['data'] >= pd.Timestamp(start_date)) & (combustivel['data'] <= pd.Timestamp(end_date))]
 
             if filtro_combustivel and filtro_combustivel != "Todos":
                 base1 = base1[base1['DESCRIÇÃO DO ABASTECIMENTO'] == filtro_combustivel]
@@ -111,7 +143,7 @@ def main():
 
             with abas[0]:
                 st.subheader(f'Período: {start_date.strftime("%d/%m/%Y")} a {end_date.strftime("%d/%m/%Y")}')
-                c1, c2 = st.columns(2)
+                c1, c2, c3 = st.columns(3)
                 with c1:
                     st.metric('Litros Externo', f'{litros_ext:,.2f} L')
                     st.metric('Valor Gasto Ext.', f'R$ {valor_ext:,.2f}')
@@ -119,6 +151,8 @@ def main():
                 with c2:
                     st.metric('Litros Interno', f'{litros_int:,.2f} L')
                     st.metric('% Interno', f'{perc_int:.1f}%')
+                with c3:
+                    st.metric('Valor Gasto Combustível Int.', f'R$ {valor_combustivel_int:,.2f}')
 
             with abas[1]:
                 st.subheader('Top 10 Abastecimentos')
@@ -164,7 +198,7 @@ def main():
             st.warning('Não foi possível processar as bases. Verifique os dados.')
 
     else:
-        st.info('Envie as duas bases (.csv ou .xlsx) para gerar o relatório.')
+        st.info('Envie as três bases (.csv ou .xlsx) para gerar o relatório.')
 
 if __name__ == '__main__':
     main()
