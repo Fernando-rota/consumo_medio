@@ -33,16 +33,6 @@ def tratar_litros(x):
     except:
         return 0.0
 
-def format_valor(v):
-    try:
-        val = float(v)
-        if val > 1000:
-            return f'R$ {val:,.2f}'
-        else:
-            return f'{val:,.2f}'
-    except:
-        return str(v)
-
 def main():
     st.title('📊 Relatório Abastecimento Externo x Interno')
 
@@ -108,21 +98,22 @@ def main():
     df_int = df_int[(df_int['DATA'].dt.date >= ini) & (df_int['DATA'].dt.date <= fim)]
     df_val = df_val[(df_val['DATA'].dt.date >= ini) & (df_val['DATA'].dt.date <= fim)]
 
-    # Filtro por tipo de combustível (base externa) em expander compacto
+    # Filtro por tipo de combustível (base externa) - botão seleção único, compacto
     combustivel_col = next((col for col in df_ext.columns if 'DESCRIÇÃO' in col or 'DESCRI' in col), None)
     tipos_combustivel = []
     combustiveis_selecionados = []
+
     if combustivel_col:
         df_ext[combustivel_col] = df_ext[combustivel_col].astype(str).str.strip()
         tipos_combustivel = sorted(df_ext[combustivel_col].dropna().unique())
-        with st.expander('🔍 Filtrar por Tipo de Combustível (Externo)', expanded=False):
-            combustiveis_selecionados = st.multiselect(
-                'Selecione os tipos',
-                options=tipos_combustivel,
-                default=tipos_combustivel,
-                help='Selecione um ou mais tipos de combustível para filtrar.'
-            )
-        df_ext = df_ext[df_ext[combustivel_col].isin(combustiveis_selecionados)]
+        # Botão de seleção único (radio) para filtro compacto
+        combustivel_escolhido = st.radio(
+            '🔍 Filtrar por Tipo de Combustível (Externo)',
+            options=tipos_combustivel,
+            index=0,
+            horizontal=True
+        )
+        df_ext = df_ext[df_ext[combustivel_col] == combustivel_escolhido]
     else:
         st.warning('Coluna de descrição do combustível não encontrada na base externa.')
 
@@ -154,7 +145,6 @@ def main():
     perc_ext = (litros_ext / total_litros * 100) if total_litros > 0 else 0
     perc_int = (litros_int / total_litros * 100) if total_litros > 0 else 0
 
-    # Tabs para visualização
     tab1, tab2, tab3 = st.tabs(['✔️ Resumo', '🔝 Top 10', '🔍 Consumo Médio'])
 
     with tab1:
@@ -171,26 +161,33 @@ def main():
             'Interno': [litros_int, valor_int]
         }).melt(id_vars='Métrica', var_name='Tipo', value_name='Valor')
 
+        def format_valor(row):
+            try:
+                val = float(row['Valor'])
+                if row['Métrica'] == 'Custo':
+                    return f'R$ {val:,.2f}'
+                else:
+                    return f'{val:,.2f} L'
+            except:
+                return str(row['Valor'])
+
         fig = px.bar(
-            df_kpi, 
-            x='Métrica', y='Valor', color='Tipo', barmode='group', 
-            text=df_kpi['Valor'].apply(format_valor),
-            labels={'Valor':'Valor (R$ ou Litros)', 'Métrica':'Métrica', 'Tipo':'Tipo de Abastecimento'},
+            df_kpi,
+            x='Métrica',
+            y='Valor',
+            color='Tipo',
+            barmode='group',
+            text=df_kpi.apply(format_valor, axis=1),
+            labels={'Valor': 'Valor', 'Métrica': 'Métrica', 'Tipo': 'Tipo de Abastecimento'},
             title='Comparativo Externo vs Interno',
-            color_discrete_map={'Externo':'#1f77b4', 'Interno':'#2ca02c'}  # azul e verde personalizados
+            color_discrete_map={'Externo': '#1f77b4', 'Interno': '#2ca02c'}
         )
-        fig.update_traces(marker_line_width=1.5, marker_line_color='white', textfont_size=14, textposition='outside')
+        fig.update_traces(marker_line_width=1.5, marker_line_color='white', textfont_size=14)
         fig.update_layout(
-            title_font_size=22,
-            yaxis=dict(title='Valor'),
-            xaxis=dict(title='Métrica'),
-            plot_bgcolor='rgba(0,0,0,0)',  # transparente
-            paper_bgcolor='rgba(0,0,0,0)', 
-            margin=dict(t=50, b=50, l=50, r=50),
-            uniformtext_minsize=12,
-            uniformtext_mode='hide',
-            legend_title_text='Tipo de Abastecimento',
-            bargap=0.3
+            title_font_size=20,
+            plot_bgcolor='rgba(0,0,0,0)',  # fundo transparente
+            paper_bgcolor='rgba(0,0,0,0)',
+            yaxis=dict(showgrid=True, gridcolor='lightgray')
         )
         st.plotly_chart(fig, use_container_width=True)
 
@@ -202,24 +199,29 @@ def main():
 
         col1, col2 = st.columns(2)
         with col1:
-            fig1 = px.bar(top_ext, y='PLACA', x='LITROS', orientation='h', title='Externo',
-                          color='LITROS', color_continuous_scale='Blues', text_auto='.2s')
+            fig1 = px.bar(
+                top_ext, y='PLACA', x='LITROS', orientation='h', title='Externo',
+                color='LITROS', color_continuous_scale='Blues', text_auto='.2s'
+            )
             fig1.update_layout(yaxis={'categoryorder': 'total ascending'})
             st.plotly_chart(fig1, use_container_width=True)
 
         with col2:
-            fig2 = px.bar(top_int, y='PLACA', x='QUANTIDADE DE LITROS', orientation='h', title='Interno',
-                          color='QUANTIDADE DE LITROS', color_continuous_scale='Greens', text_auto='.2s')
+            fig2 = px.bar(
+                top_int, y='PLACA', x='QUANTIDADE DE LITROS', orientation='h', title='Interno',
+                color='QUANTIDADE DE LITROS', color_continuous_scale='Greens', text_auto='.2s'
+            )
             fig2.update_layout(yaxis={'categoryorder': 'total ascending'})
             st.plotly_chart(fig2, use_container_width=True)
 
     with tab3:
         st.subheader('🔍 Consumo Médio (Km/L)')
 
-        # Preparar dados para consumo médio
         df_comb = pd.concat([
-            df_ext[['PLACA', 'DATA', 'KM ATUAL', 'LITROS']].rename(columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'LITROS': 'litros'}),
-            df_int[['PLACA', 'DATA', 'KM ATUAL', 'QUANTIDADE DE LITROS']].rename(columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'QUANTIDADE DE LITROS': 'litros'})
+            df_ext[['PLACA', 'DATA', 'KM ATUAL', 'LITROS']].rename(
+                columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'LITROS': 'litros'}),
+            df_int[['PLACA', 'DATA', 'KM ATUAL', 'QUANTIDADE DE LITROS']].rename(
+                columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'QUANTIDADE DE LITROS': 'litros'})
         ]).dropna(subset=['placa', 'data', 'km_atual', 'litros'])
 
         df_comb = df_comb.sort_values(['placa', 'data'])
