@@ -70,7 +70,11 @@ def main():
         return
     df_int['DATA'] = pd.to_datetime(df_int[col_data_int], dayfirst=True, errors='coerce')
 
-    df_val['DATA'] = pd.to_datetime(df_val[next((c for c in df_val.columns if 'DATA' in c), 'DATA')], dayfirst=True, errors='coerce')
+    col_data_val = next((c for c in df_val.columns if 'DATA' in c or 'DT.' in c), None)
+    if not col_data_val:
+        st.error("Coluna de data não encontrada na base de valores.")
+        return
+    df_val['DATA'] = pd.to_datetime(df_val[col_data_val], dayfirst=True, errors='coerce')
 
     df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
 
@@ -94,7 +98,6 @@ def main():
         )
         df_ext = df_ext[df_ext[combustivel_col].isin(combustiveis_escolhidos)]
 
-        # Aplicar o mesmo filtro na base interna se possível
         tipo_combustivel_int = next((col for col in df_int.columns if 'TIPO' in col or 'DESCRI' in col), None)
         if tipo_combustivel_int:
             df_int[tipo_combustivel_int] = df_int[tipo_combustivel_int].astype(str).str.strip().str.upper()
@@ -126,7 +129,7 @@ def main():
     tab1, tab2, tab3 = st.tabs(['✔️ Resumo', '🔝 Top 10', '🔍 Consumo Médio'])
 
     with tab1:
-        st.subheader(f'Período: {ini.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")}')
+        st.subheader(f'Período: {ini.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")})
         c1, c2, c3, c4 = st.columns(4)
         c1.metric('⛽ Litros Ext.', f'{litros_ext:,.2f} L', delta=f'{perc_ext:.1f}%')
         c2.metric('💰 Custo Ext.', f'R$ {valor_ext:,.2f}')
