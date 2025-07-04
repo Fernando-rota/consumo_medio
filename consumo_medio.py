@@ -108,21 +108,21 @@ def main():
 
             st.subheader('Top 10 veículos com mais litros abastecidos (Externo)')
             top_ext = (
-                base1.groupby('placa')['litros']
+                base1.groupby('placa', as_index=False)['litros']
                 .sum()
-                .sort_values(ascending=False)
+                .sort_values(by='litros', ascending=False)
                 .head(10)
             )
             st.dataframe(
-                top_ext.reset_index().rename(columns={'litros': 'Litros'}).style.format({'Litros': '{:,.2f}'})
+                top_ext.rename(columns={'litros': 'Litros'}).style.format({'Litros': '{:,.2f}'})
             )
             fig_ext = px.bar(
-                top_ext.reset_index(),
+                top_ext,
                 x='placa',
-                y='Litros',
+                y='litros',
                 title='Top 10 Abastecimentos Externos',
-                labels={'placa': 'Placa', 'Litros': 'Litros'},
-                color='Litros',
+                labels={'placa': 'Placa', 'litros': 'Litros'},
+                color='litros',
                 color_continuous_scale='Blues'
             )
             st.plotly_chart(fig_ext, use_container_width=True)
