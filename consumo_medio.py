@@ -44,6 +44,15 @@ def style_dataframe(df, numeric_columns):
             styles.append([""] * len(df))
     return styles
 
+# Função para converter datas de forma segura
+def converter_data_segura(serie, dayfirst=True):
+    """Converte uma série de datas com tratamento de erros"""
+    try:
+        return pd.to_datetime(serie, dayfirst=dayfirst, format='mixed')
+    except Exception as e:
+        st.error(f"Erro ao converter datas: {str(e)}")
+        return pd.NaT
+
 # Função principal de carregamento de dados
 @st.cache_data(show_spinner="Processando dados...")
 def carregar_dados(uploaded_ext, uploaded_int, uploaded_val):
@@ -73,10 +82,21 @@ def carregar_dados(uploaded_ext, uploaded_int, uploaded_val):
             'KM_ATUAL': 'KM_ATUAL'
         })
         
-        # Converter tipos de dados
-        df_ext['DATA'] = pd.to_datetime(df_ext['DATA'], dayfirst=True)
-        df_ext['LITROS'] = pd.to_numeric(df_ext['LITROS'].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
-        df_ext['VALOR'] = pd.to_numeric(df_ext['VALOR'].astype(str).str.replace('R\$', '').str.replace('.', '').str.replace(',', '.'), errors='coerce')
+        # Converter tipos de dados com tratamento robusto
+        df_ext['DATA'] = converter_data_segura(df_ext['DATA'])
+        df_ext['LITROS'] = pd.to_numeric(
+            df_ext['LITROS'].astype(str)
+            .str.replace('.', '')
+            .str.replace(',', '.'), 
+            errors='coerce'
+        )
+        df_ext['VALOR'] = pd.to_numeric(
+            df_ext['VALOR'].astype(str)
+            .str.replace('R\$', '')
+            .str.replace('.', '')
+            .str.replace(',', '.'), 
+            errors='coerce'
+        )
         df_ext['TIPO'] = 'EXTERNO'
 
         # Carregar base interna
@@ -91,8 +111,13 @@ def carregar_dados(uploaded_ext, uploaded_int, uploaded_val):
             'KM_ATUAL': 'KM_ATUAL'
         })
         
-        df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True)
-        df_int['LITROS'] = pd.to_numeric(df_int['LITROS'].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
+        df_int['DATA'] = converter_data_segura(df_int['DATA'])
+        df_int['LITROS'] = pd.to_numeric(
+            df_int['LITROS'].astype(str)
+            .str.replace('.', '')
+            .str.replace(',', '.'), 
+            errors='coerce'
+        )
         df_int['TIPO'] = 'INTERNO'
 
         # Carregar base de valores
@@ -107,8 +132,14 @@ def carregar_dados(uploaded_ext, uploaded_int, uploaded_val):
             'VALOR_PAGO': 'VALOR'
         })
         
-        df_val['DATA'] = pd.to_datetime(df_val['DATA'], dayfirst=True)
-        df_val['VALOR'] = pd.to_numeric(df_val['VALOR'].astype(str).str.replace('R\$', '').str.replace('.', '').str.replace(',', '.'), errors='coerce')
+        df_val['DATA'] = converter_data_segura(df_val['DATA'])
+        df_val['VALOR'] = pd.to_numeric(
+            df_val['VALOR'].astype(str)
+            .str.replace('R\$', '')
+            .str.replace('.', '')
+            .str.replace(',', '.'), 
+            errors='coerce'
+        )
 
         return df_ext, df_int, df_val
 
