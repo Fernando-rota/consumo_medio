@@ -72,7 +72,6 @@ def main():
     df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
 
-    # Para df_val as colunas exatas de data e valor são "EMISSÃO" e "VALOR"
     if 'EMISSÃO' not in df_val.columns or 'VALOR' not in df_val.columns:
         st.error("A base de valores deve conter as colunas 'EMISSÃO' e 'VALOR'.")
         return
@@ -80,11 +79,24 @@ def main():
     df_val['DATA'] = pd.to_datetime(df_val['EMISSÃO'], dayfirst=True, errors='coerce')
     df_val['VALOR_TOTAL'] = df_val['VALOR'].apply(tratar_valor)
 
-    # Filtro de data a partir de 2023-01-01
-    data_inicio = pd.to_datetime('2023-01-01')
-    df_ext = df_ext[df_ext['DATA'] >= data_inicio]
-    df_int = df_int[df_int['DATA'] >= data_inicio]
-    df_val = df_val[df_val['DATA'] >= data_inicio]
+    # --- FILTRO DE DATA INTERATIVO ---
+    # Definir mínimo e máximo para slider de datas considerando as 3 bases
+    min_data = max(pd.Timestamp('2023-01-01'),
+                   min(df_ext['DATA'].min(), df_int['DATA'].min(), df_val['DATA'].min()))
+    max_data = max(df_ext['DATA'].max(), df_int['DATA'].max(), df_val['DATA'].max())
+
+    data_selecao = st.sidebar.slider(
+        '📅 Selecione o intervalo de datas',
+        min_value=min_data.date(),
+        max_value=max_data.date(),
+        value=(min_data.date(), max_data.date()),
+        format='DD/MM/YYYY'
+    )
+
+    # Aplicar filtro de data nas 3 bases
+    df_ext = df_ext[(df_ext['DATA'].dt.date >= data_selecao[0]) & (df_ext['DATA'].dt.date <= data_selecao[1])]
+    df_int = df_int[(df_int['DATA'].dt.date >= data_selecao[0]) & (df_int['DATA'].dt.date <= data_selecao[1])]
+    df_val = df_val[(df_val['DATA'].dt.date >= data_selecao[0]) & (df_val['DATA'].dt.date <= data_selecao[1])]
 
     # Coluna combustível na base externa (exemplo: "DESCRIÇÃO DO ABASTECIMENTO")
     combustivel_col = next((col for col in df_ext.columns if 'DESCRI' in col), None)
@@ -93,17 +105,16 @@ def main():
         df_ext = df_ext[~df_ext[combustivel_col].str.lower().isin(['nan', '', 'none'])]
 
     # Filtros globais na sidebar
-    with st.sidebar:
-        st.header("Filtros Gerais")
-        # Tipo combustível filtro
-        if combustivel_col:
-            tipos_combustivel = sorted(df_ext[combustivel_col].dropna().unique())
-            filtro_combustivel = st.selectbox('🛢️ Tipo de Combustível:', ['Todos'] + tipos_combustivel)
-        else:
-            filtro_combustivel = 'Todos'
+    st.sidebar.header("Filtros Gerais")
 
-        placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique())
-        filtro_placa = st.selectbox('🚗 Placa:', ['Todas'] + placas)
+    if combustivel_col:
+        tipos_combustivel = sorted(df_ext[combustivel_col].dropna().unique())
+        filtro_combustivel = st.sidebar.selectbox('🛢️ Tipo de Combustível:', ['Todos'] + tipos_combustivel)
+    else:
+        filtro_combustivel = 'Todos'
+
+    placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique())
+    filtro_placa = st.sidebar.selectbox('🚗 Placa:', ['Todas'] + placas)
 
     # Aplicar filtros globais
     if filtro_combustivel != 'Todos' and combustivel_col:
@@ -140,7 +151,7 @@ def main():
     ])
 
     with tab1:
-        st.markdown(f"### 📆 Período: a partir de 01/01/2023")
+        st.markdown(f"### 📆 Período Selecionado: `{data_selecao[0].strftime('%d/%m/%Y')} a {data_selecao[1].strftime('%d/%m/%Y')}`")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric('⛽ Litros (Externo)', f'{litros_ext:,.2f} L', delta=f'{perc_ext:.1f} %')
         c2.metric('💸 Custo (Externo)', f'R$ {valor_ext:,.2f}')
@@ -223,10 +234,8 @@ def main():
         df_int_agg = df_int.groupby('DATA').agg({'QUANTIDADE DE LITROS':'sum'}).reset_index()
         df_val_agg = df_val.groupby('DATA').agg({'VALOR_TOTAL':'sum'}).reset_index()
 
-        # Renomear para evitar conflitos no merge
         df_int_agg = df_int_agg.rename(columns={'QUANTIDADE DE LITROS': 'QTDE_LITROS'})
 
-        # Merge para cálculo do preço médio interno
         df_preco_medio_int = pd.merge(df_val_agg, df_int_agg, on='DATA', how='inner')
 
         df_preco_medio_int['PRECO_MEDIO'] = df_preco_medio_int.apply(
