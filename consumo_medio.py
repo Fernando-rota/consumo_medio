@@ -71,11 +71,21 @@ def main():
     df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
 
-    data_val_col = next((c for c in df_val.columns if 'DATA' in c or 'DT.' in c), None)
-    if not data_val_col:
-        st.error("Coluna de data não encontrada na base de valores.")
-        return
+    # === Escolha interativa da coluna data na base de valores ===
+    st.write("Colunas disponíveis na base de valores:", df_val.columns.tolist())
+
+    data_val_col = st.selectbox(
+        "Selecione a coluna de data da base de valores:",
+        options=df_val.columns.tolist()
+    )
+
     df_val['DATA'] = pd.to_datetime(df_val[data_val_col], dayfirst=True, errors='coerce')
+
+    if df_val['DATA'].isnull().all():
+        st.error("A coluna selecionada não contém dados de data válidos.")
+        return
+    else:
+        st.success(f"Coluna '{data_val_col}' usada como data da base de valores.")
 
     ini_min = min(df_ext['DATA'].min(), df_int['DATA'].min(), df_val['DATA'].min()).date()
     fim_max = max(df_ext['DATA'].max(), df_int['DATA'].max(), df_val['DATA'].max()).date()
@@ -256,5 +266,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
