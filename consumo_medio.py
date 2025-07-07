@@ -339,7 +339,7 @@ def main():
             st.dataframe(
                 consumo_medio.style
                     .format({'CONSUMO_KM_L': '{:.2f} km/L'})
-                    .apply(lambda x: style_dataframe(pd.DataFrame(x), ['CONSUMO_KM_L']), 
+                    .apply(lambda x: style_dataframe(pd.DataFrame(x), ['CONSUMO_KM_L']), axis=None),
                 height=500
             )
         
