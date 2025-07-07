@@ -73,26 +73,13 @@ def main():
     df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
 
-    # Base valores - Data e Valor - Ajustado para "EMISSÃO" e "VALORES"
-    possible_date_cols_val = [c for c in df_val.columns if 'EMISSÃO' in c.upper() or 'DATA' in c.upper() or 'DT' in c.upper()]
-    if possible_date_cols_val:
-        data_val_col = possible_date_cols_val[0]
-    else:
-        st.error("Coluna de data não encontrada na base de combustível interno.")
+    # Base valores - Data e Valor, com nomes fixos EMISSÃO e VALOR
+    if 'EMISSÃO' not in df_val.columns or 'VALOR' not in df_val.columns:
+        st.error("A base de valores deve conter as colunas 'EMISSÃO' e 'VALOR'.")
         return
 
-    df_val['DATA'] = pd.to_datetime(df_val[data_val_col], dayfirst=True, errors='coerce')
-    if df_val['DATA'].isnull().all():
-        st.error("A coluna de data na base de combustível interno contém apenas valores inválidos.")
-        return
-
-    possible_val_cols = [c for c in df_val.columns if 'VALORES' in c.upper()]
-    if possible_val_cols:
-        val_col = possible_val_cols[0]
-    else:
-        st.error("Coluna de valores não encontrada na base de combustível interno.")
-        return
-    df_val['VALOR_TOTAL'] = df_val[val_col].apply(tratar_valor)
+    df_val['DATA'] = pd.to_datetime(df_val['EMISSÃO'], dayfirst=True, errors='coerce')
+    df_val['VALOR_TOTAL'] = df_val['VALOR'].apply(tratar_valor)
 
     # Filtrar a partir de 2023
     data_inicio_2023 = datetime.date(2023, 1, 1)
