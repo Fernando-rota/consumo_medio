@@ -116,10 +116,16 @@ def main():
 
     if filtro_combustivel != 'Todos':
         df_ext = df_ext[df_ext[combustivel_col] == filtro_combustivel]
+
     if filtro_placa != 'Todas':
         df_ext = df_ext[df_ext['PLACA'] == filtro_placa]
         df_int = df_int[df_int['PLACA'] == filtro_placa]
-        df_val = df_val[df_val['PLACA'] == filtro_placa] if 'PLACA' in df_val.columns else df_val
+
+        if 'PLACA' in df_val.columns:
+            df_val['PLACA'] = df_val['PLACA'].apply(normalizar_placa)
+            df_val = df_val[df_val['PLACA'] == filtro_placa]
+        else:
+            st.warning("⚠️ A base de valores não contém a coluna 'PLACA'. Filtro de placa não aplicado nessa base.")
 
     df_ext['KM ATUAL'] = pd.to_numeric(df_ext.get('KM ATUAL'), errors='coerce')
     df_ext['CUSTO TOTAL'] = df_ext['CUSTO TOTAL'].apply(tratar_valor)
