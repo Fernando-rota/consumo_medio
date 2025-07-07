@@ -62,22 +62,22 @@ def main():
     st.markdown("<h1 style='text-align:center;'>⛽ Abastecimento Interno vs Externo</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:gray;'>Análise comparativa de consumo, custo e eficiência por veículo</p>", unsafe_allow_html=True)
 
- def main():
-    st.markdown("<h1 style='text-align:center;'>⛽ Abastecimento Interno vs Externo</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:gray;'>Análise comparativa de consumo, custo e eficiência por veículo</p>", unsafe_allow_html=True)
+ # Substitua todo o conteúdo do arquivo por esta versão sanitizada:
+import streamlit as st
 
-    # Seção de upload de arquivos - CORRIGIDA
-    with st.expander('📁 Carregar bases de dados (Clique para ver instruções)'):
-        st.markdown("""
-        **📝 Formato das planilhas:**  
-        - **Base Externa**: Deve conter as colunas `DATA`, `PLACA`, `CONSUMO`, `CUSTO TOTAL`  
-        - **Base Interna**: Deve conter as colunas `DATA`, `PLACA`, `QUANTIDADE DE LITROS`  
-        - **Base Combustível**: Deve conter as colunas `EMISSÃO`, `VALOR`  
-        """)
+def main():
+    # Cabeçalho
+    st.markdown("<h1 style='text-align:center;'>⛽ Abastecimento</h1>", unsafe_allow_html=True)
+    
+    # Upload de arquivos (versão simplificada)
+    with st.expander('📁 Carregar bases'):
         c1, c2, c3 = st.columns(3)
-        up_ext = c1.file_uploader('Base Externa', type=['csv', 'xlsx'])
-        up_int = c2.file_uploader('Base Interna', type=['csv', 'xlsx'])
-        up_val = c3.file_uploader('Base Combustível (Valores)', type=['csv', 'xlsx'])
+        up_ext = c1.file_uploader('Externa', type=['csv', 'xlsx'])
+        up_int = c2.file_uploader('Interna', type=['csv', 'xlsx'])
+        up_val = c3.file_uploader('Valores', type=['csv', 'xlsx'])
+
+if __name__ == '__main__':
+    main()
 
     # Restante do código...
       
