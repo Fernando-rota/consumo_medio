@@ -57,6 +57,7 @@ def main():
     for df in [df_ext, df_int, df_val]:
         df.columns = df.columns.str.strip().str.upper()
 
+    # Validações base externa
     if 'CONSUMO' not in df_ext.columns or 'DATA' not in df_ext.columns:
         st.error("A base externa deve conter as colunas 'CONSUMO' e 'DATA'.")
         return
@@ -65,30 +66,36 @@ def main():
     df_ext['LITROS'] = pd.to_numeric(df_ext['LITROS'].apply(tratar_litros), errors='coerce').fillna(0.0)
     df_ext['DATA'] = pd.to_datetime(df_ext['DATA'], dayfirst=True, errors='coerce')
 
+    # Validação base interna
     if 'DATA' not in df_int.columns:
         st.error("A base interna deve conter a coluna 'DATA'.")
         return
-
     df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
 
-    # Escolha automática da coluna de data na base de valores:
-    possible_date_cols = [c for c in df_val.columns if 'DATA' in c or 'DT' in c]
-    if possible_date_cols:
-        data_val_col = possible_date_cols[0]
+    # Base valores - Data e Valor - Ajustado para "EMISSÃO" e "VALORES"
+    possible_date_cols_val = [c for c in df_val.columns if 'EMISSÃO' in c.upper() or 'DATA' in c.upper() or 'DT' in c.upper()]
+    if possible_date_cols_val:
+        data_val_col = possible_date_cols_val[0]
     else:
-        st.error("Coluna de data não encontrada na base de valores.")
+        st.error("Coluna de data não encontrada na base de combustível interno.")
         return
 
     df_val['DATA'] = pd.to_datetime(df_val[data_val_col], dayfirst=True, errors='coerce')
-
     if df_val['DATA'].isnull().all():
-        st.error("A coluna de data encontrada não contém dados válidos.")
+        st.error("A coluna de data na base de combustível interno contém apenas valores inválidos.")
         return
 
-    # FILTRO AUTOMÁTICO: Apenas dados de 2023 em diante
-    data_inicio_2023 = datetime.date(2023, 1, 1)
+    possible_val_cols = [c for c in df_val.columns if 'VALORES' in c.upper()]
+    if possible_val_cols:
+        val_col = possible_val_cols[0]
+    else:
+        st.error("Coluna de valores não encontrada na base de combustível interno.")
+        return
+    df_val['VALOR_TOTAL'] = df_val[val_col].apply(tratar_valor)
 
+    # Filtrar a partir de 2023
+    data_inicio_2023 = datetime.date(2023, 1, 1)
     df_ext = df_ext[df_ext['DATA'].dt.date >= data_inicio_2023]
     df_int = df_int[df_int['DATA'].dt.date >= data_inicio_2023]
     df_val = df_val[df_val['DATA'].dt.date >= data_inicio_2023]
@@ -97,7 +104,7 @@ def main():
     fim_max = max(df_ext['DATA'].max(), df_int['DATA'].max(), df_val['DATA'].max()).date()
 
     ini, fim = st.slider('📅 Selecione o Período:', min_value=ini_min, max_value=fim_max,
-                        value=(ini_min, fim_max), format='DD/MM/YYYY')
+                         value=(ini_min, fim_max), format='DD/MM/YYYY')
 
     df_ext = df_ext[(df_ext['DATA'].dt.date >= ini) & (df_ext['DATA'].dt.date <= fim)]
     df_int = df_int[(df_int['DATA'].dt.date >= ini) & (df_int['DATA'].dt.date <= fim)]
@@ -112,16 +119,9 @@ def main():
         st.warning('⚠️ Coluna de tipo de combustível não encontrada na base externa.')
         tipos_combustivel = []
 
-    filtro_combustivel = None
-    filtro_placa = None
-
     with st.sidebar:
         st.header("Filtros Gerais")
-        if tipos_combustivel:
-            filtro_combustivel = st.selectbox('🛢️ Tipo de Combustível:', ['Todos'] + tipos_combustivel)
-        else:
-            filtro_combustivel = 'Todos'
-
+        filtro_combustivel = st.selectbox('🛢️ Tipo de Combustível:', ['Todos'] + tipos_combustivel if tipos_combustivel else ['Todos'])
         placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique())
         filtro_placa = st.selectbox('🚗 Placa:', ['Todas'] + placas)
 
@@ -138,9 +138,6 @@ def main():
     df_ext['CUSTO TOTAL'] = df_ext['CUSTO TOTAL'].apply(tratar_valor)
     df_int['KM ATUAL'] = pd.to_numeric(df_int.get('KM ATUAL'), errors='coerce')
     df_int['QUANTIDADE DE LITROS'] = pd.to_numeric(df_int.get('QUANTIDADE DE LITROS'), errors='coerce').fillna(0.0)
-
-    val_col = next((c for c in df_val.columns if 'VALOR' in c), None)
-    df_val['VALOR_TOTAL'] = df_val[val_col].apply(tratar_valor) if val_col else 0.0
 
     litros_ext = df_ext['LITROS'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
@@ -244,7 +241,7 @@ def main():
 
         df_preco_medio_int = pd.merge(df_val_agg, df_int_agg, on='DATA', how='inner')
         df_preco_medio_int['PRECO_MEDIO'] = df_preco_medio_int.apply(
-            lambda row: row['VALOR_TOTAL'] / row['QUANTIDADE DE LITROS'] if row['QUANTIDADE DE LITROS'] > 0 else 0, axis=1)
+            lambda row: row['VALOR_TOTAL'] / row['QUANTIDADE DE LITROS'] if row['QUANTIDADE_DE_LITROS'] > 0 else 0, axis=1)
 
         fig_ext_litros = px.line(df_ext_agg, x='DATA', y='LITROS', markers=True,
                                  title='Litros Consumidos (Externo)', labels={'LITROS':'Litros', 'DATA':'Data'})
