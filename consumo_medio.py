@@ -23,7 +23,7 @@ def carregar_base(file, nome):
 
 def tratar_valor(x):
     try:
-        return float(str(x).replace('R$', '').replace('.', '').replace(',', '.'))
+        return float(str(x).replace('R$', '').replace('.', '').replace(',', '.').strip())
     except:
         return 0.0
 
@@ -56,7 +56,6 @@ def main():
     for df in [df_ext, df_int, df_val]:
         df.columns = df.columns.str.strip().str.upper()
 
-    # Validação colunas essenciais
     if 'CONSUMO' not in df_ext.columns or 'DATA' not in df_ext.columns:
         st.error("A base externa deve conter as colunas 'CONSUMO' e 'DATA'.")
         return
@@ -77,10 +76,9 @@ def main():
         return
 
     df_val['DATA'] = pd.to_datetime(df_val['EMISSÃO'], dayfirst=True, errors='coerce')
-    df_val['VALOR_TOTAL'] = df_val['VALOR'].apply(tratar_valor)
+    df_val['VALOR'] = df_val['VALOR'].apply(tratar_valor)
 
-    # --- FILTRO DE DATA INTERATIVO ---
-    # Definir mínimo e máximo para slider de datas considerando as 3 bases
+    # Filtro de data interativo
     min_data = max(pd.Timestamp('2023-01-01'),
                    min(df_ext['DATA'].min(), df_int['DATA'].min(), df_val['DATA'].min()))
     max_data = max(df_ext['DATA'].max(), df_int['DATA'].max(), df_val['DATA'].max())
@@ -93,18 +91,15 @@ def main():
         format='DD/MM/YYYY'
     )
 
-    # Aplicar filtro de data nas 3 bases
     df_ext = df_ext[(df_ext['DATA'].dt.date >= data_selecao[0]) & (df_ext['DATA'].dt.date <= data_selecao[1])]
     df_int = df_int[(df_int['DATA'].dt.date >= data_selecao[0]) & (df_int['DATA'].dt.date <= data_selecao[1])]
     df_val = df_val[(df_val['DATA'].dt.date >= data_selecao[0]) & (df_val['DATA'].dt.date <= data_selecao[1])]
 
-    # Coluna combustível na base externa (exemplo: "DESCRIÇÃO DO ABASTECIMENTO")
     combustivel_col = next((col for col in df_ext.columns if 'DESCRI' in col), None)
     if combustivel_col:
         df_ext[combustivel_col] = df_ext[combustivel_col].astype(str).str.strip()
         df_ext = df_ext[~df_ext[combustivel_col].str.lower().isin(['nan', '', 'none'])]
 
-    # Filtros globais na sidebar
     st.sidebar.header("Filtros Gerais")
 
     if combustivel_col:
@@ -116,7 +111,6 @@ def main():
     placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique())
     filtro_placa = st.sidebar.selectbox('🚗 Placa:', ['Todas'] + placas)
 
-    # Aplicar filtros globais
     if filtro_combustivel != 'Todos' and combustivel_col:
         df_ext = df_ext[df_ext[combustivel_col] == filtro_combustivel]
     if filtro_placa != 'Todas':
@@ -125,7 +119,6 @@ def main():
         if 'PLACA' in df_val.columns:
             df_val = df_val[df_val['PLACA'] == filtro_placa]
 
-    # Normalizações e conversões
     df_ext['PLACA'] = df_ext['PLACA'].astype(str).str.upper().str.strip()
     df_int['PLACA'] = df_int['PLACA'].astype(str).str.upper().str.strip()
     df_ext['KM ATUAL'] = pd.to_numeric(df_ext.get('KM ATUAL'), errors='coerce')
@@ -133,11 +126,10 @@ def main():
     df_int['KM ATUAL'] = pd.to_numeric(df_int.get('KM ATUAL'), errors='coerce')
     df_int['QUANTIDADE DE LITROS'] = pd.to_numeric(df_int.get('QUANTIDADE DE LITROS'), errors='coerce').fillna(0.0)
 
-    # Somas gerais
     litros_ext = df_ext['LITROS'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
     litros_int = df_int['QUANTIDADE DE LITROS'].sum()
-    valor_int = df_val['VALOR_TOTAL'].sum()
+    valor_int = df_val['VALOR'].sum()
 
     total_litros = litros_ext + litros_int
     perc_ext = (litros_ext / total_litros * 100) if total_litros > 0 else 0
@@ -232,14 +224,14 @@ def main():
 
         df_ext_agg = df_ext.groupby('DATA').agg({'LITROS':'sum', 'CUSTO TOTAL':'sum'}).reset_index()
         df_int_agg = df_int.groupby('DATA').agg({'QUANTIDADE DE LITROS':'sum'}).reset_index()
-        df_val_agg = df_val.groupby('DATA').agg({'VALOR_TOTAL':'sum'}).reset_index()
+        df_val_agg = df_val.groupby('DATA').agg({'VALOR':'sum'}).reset_index()
 
         df_int_agg = df_int_agg.rename(columns={'QUANTIDADE DE LITROS': 'QTDE_LITROS'})
 
         df_preco_medio_int = pd.merge(df_val_agg, df_int_agg, on='DATA', how='inner')
 
         df_preco_medio_int['PRECO_MEDIO'] = df_preco_medio_int.apply(
-            lambda row: row['VALOR_TOTAL'] / row['QTDE_LITROS'] if row['QTDE_LITROS'] > 0 else 0, axis=1)
+            lambda row: row['VALOR'] / row['QTDE_LITROS'] if row['QTDE_LITROS'] > 0 else 0, axis=1)
 
         fig_ext_litros = px.line(df_ext_agg, x='DATA', y='LITROS', markers=True,
                                  title='Litros Consumidos (Externo)', labels={'LITROS':'Litros', 'DATA':'Data'})
@@ -253,8 +245,8 @@ def main():
                                  title='Litros Consumidos (Interno)', labels={'QTDE_LITROS':'Litros', 'DATA':'Data'})
         st.plotly_chart(fig_int_litros, use_container_width=True)
 
-        fig_int_custo = px.line(df_val_agg, x='DATA', y='VALOR_TOTAL', markers=True,
-                                title='Custo Total (Interno)', labels={'VALOR_TOTAL':'R$', 'DATA':'Data'})
+        fig_int_custo = px.line(df_val_agg, x='DATA', y='VALOR', markers=True,
+                                title='Custo Total (Interno)', labels={'VALOR':'R$', 'DATA':'Data'})
         st.plotly_chart(fig_int_custo, use_container_width=True)
 
         fig_preco_medio = px.line(df_preco_medio_int, x='DATA', y='PRECO_MEDIO', markers=True,
