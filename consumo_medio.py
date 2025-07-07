@@ -72,14 +72,18 @@ def main():
     df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
 
-    data_val_col = st.selectbox(
-        "Selecione a coluna de data da base de valores:",
-        options=df_val.columns.tolist()
-    )
+    # Escolha automática da coluna de data na base de valores:
+    possible_date_cols = [c for c in df_val.columns if 'DATA' in c or 'DT' in c]
+    if possible_date_cols:
+        data_val_col = possible_date_cols[0]
+    else:
+        st.error("Coluna de data não encontrada na base de valores.")
+        return
+
     df_val['DATA'] = pd.to_datetime(df_val[data_val_col], dayfirst=True, errors='coerce')
 
     if df_val['DATA'].isnull().all():
-        st.error("A coluna selecionada não contém dados de data válidos.")
+        st.error("A coluna de data encontrada não contém dados válidos.")
         return
 
     # FILTRO AUTOMÁTICO: Apenas dados de 2023 em diante
