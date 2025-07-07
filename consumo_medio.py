@@ -71,9 +71,7 @@ def main():
     df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
 
-    # === Escolha interativa da coluna data na base de valores ===
-    st.write("Colunas disponíveis na base de valores:", df_val.columns.tolist())
-
+    # Escolha interativa da coluna data na base de valores (sem exibir lista nem mensagem sucesso)
     data_val_col = st.selectbox(
         "Selecione a coluna de data da base de valores:",
         options=df_val.columns.tolist()
@@ -84,8 +82,6 @@ def main():
     if df_val['DATA'].isnull().all():
         st.error("A coluna selecionada não contém dados de data válidos.")
         return
-    else:
-        st.success(f"Coluna '{data_val_col}' usada como data da base de valores.")
 
     ini_min = min(df_ext['DATA'].min(), df_int['DATA'].min(), df_val['DATA'].min()).date()
     fim_max = max(df_ext['DATA'].max(), df_int['DATA'].max(), df_val['DATA'].max()).date()
