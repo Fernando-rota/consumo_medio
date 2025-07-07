@@ -62,12 +62,11 @@ def main():
     if df_ext is None or df_int is None or df_val is None:
         return
 
-    # Padronizar colunas e remover placas inválidas
     for df in [df_ext, df_int, df_val]:
         df.columns = df.columns.str.strip().str.upper()
 
     df_ext = remover_placas_invalidas(df_ext)
-    df_int = remover_placas_invalidas(df_int)
+    df_int = df_int.copy()
     df_val = remover_placas_invalidas(df_val)
 
     if 'CONSUMO' not in df_ext.columns or 'DATA' not in df_ext.columns:
@@ -81,7 +80,6 @@ def main():
     if 'DATA' not in df_int.columns:
         st.error("A base interna deve conter a coluna 'DATA'.")
         return
-
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
 
     data_val_col = next((c for c in df_val.columns if 'DATA' in c or 'DT.' in c), None)
@@ -120,12 +118,9 @@ def main():
     if filtro_placa != 'Todas':
         df_ext = df_ext[df_ext['PLACA'] == filtro_placa]
         df_int = df_int[df_int['PLACA'] == filtro_placa]
-
         if 'PLACA' in df_val.columns:
             df_val['PLACA'] = df_val['PLACA'].apply(normalizar_placa)
             df_val = df_val[df_val['PLACA'] == filtro_placa]
-        else:
-            st.warning("⚠️ A base de valores não contém a coluna 'PLACA'. Filtro de placa não aplicado nessa base.")
 
     df_ext['KM ATUAL'] = pd.to_numeric(df_ext.get('KM ATUAL'), errors='coerce')
     df_ext['CUSTO TOTAL'] = df_ext['CUSTO TOTAL'].apply(tratar_valor)
@@ -135,15 +130,31 @@ def main():
     val_col = next((c for c in df_val.columns if 'VALOR' in c), None)
     df_val['VALOR_TOTAL'] = df_val[val_col].apply(tratar_valor) if val_col else 0.0
 
+    # Preço médio por litro com base nas entradas no tanque (placa '-')
+    df_entrada = df_int[df_int['PLACA'] == '-'].copy()
+    df_entrada_total = df_entrada.groupby('DATA')['QUANTIDADE DE LITROS'].sum().reset_index(name='litros_entrada')
+    df_val_total = df_val.groupby('DATA')['VALOR_TOTAL'].sum().reset_index(name='valor_total')
+    df_entrada_merge = pd.merge(df_entrada_total, df_val_total, on='DATA', how='inner')
+    df_entrada_merge['PRECO_MEDIO_LITRO'] = df_entrada_merge.apply(
+        lambda row: row['valor_total'] / row['litros_entrada'] if row['litros_entrada'] > 0 else 0, axis=1
+    )
+
     litros_ext = df_ext['LITROS'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
-    litros_int = df_int['QUANTIDADE DE LITROS'].sum()
+    df_int_consumo = df_int[df_int['PLACA'] != '-']
+    litros_int = df_int_consumo['QUANTIDADE DE LITROS'].sum()
     valor_int = df_val['VALOR_TOTAL'].sum()
     total_litros = litros_ext + litros_int
     perc_ext = (litros_ext / total_litros * 100) if total_litros > 0 else 0
     perc_int = (litros_int / total_litros * 100) if total_litros > 0 else 0
 
-    tab1, tab2, tab3, tab4 = st.tabs(['📊 Resumo Geral', '🚚 Top 10 Veículos', '⚙️ Consumo Médio', '📈 Tendências Temporais'])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        '📊 Resumo Geral',
+        '🚚 Top 10 Veículos',
+        '⚙️ Consumo Médio',
+        '📈 Tendências Temporais',
+        '💰 Custo Médio do Diesel'
+    ])
 
     with tab1:
         st.markdown(f"### 📆 Período Selecionado: `{ini.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}`")
@@ -166,7 +177,7 @@ def main():
 
     with tab2:
         top_ext = df_ext.groupby('PLACA')['LITROS'].sum().nlargest(10).reset_index()
-        top_int = df_int.groupby('PLACA')['QUANTIDADE DE LITROS'].sum().nlargest(10).reset_index()
+        top_int = df_int_consumo.groupby('PLACA')['QUANTIDADE DE LITROS'].sum().nlargest(10).reset_index()
 
         col1, col2 = st.columns(2)
         fig1 = px.bar(top_ext, y='PLACA', x='LITROS', orientation='h',
@@ -182,7 +193,7 @@ def main():
     with tab3:
         df_comb = pd.concat([
             df_ext[['PLACA', 'DATA', 'KM ATUAL', 'LITROS']].rename(columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'LITROS': 'litros'}),
-            df_int[['PLACA', 'DATA', 'KM ATUAL', 'QUANTIDADE DE LITROS']].rename(columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'QUANTIDADE DE LITROS': 'litros'})
+            df_int_consumo[['PLACA', 'DATA', 'KM ATUAL', 'QUANTIDADE DE LITROS']].rename(columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'QUANTIDADE DE LITROS': 'litros'})
         ])
         df_comb = df_comb.dropna(subset=['placa', 'data', 'km_atual', 'litros']).sort_values(['placa', 'data'])
         df_comb['km_diff'] = df_comb.groupby('placa')['km_atual'].diff()
@@ -215,7 +226,7 @@ def main():
         st.markdown("### 📈 Tendência de Consumo, Custo e Preço Médio ao longo do Tempo")
 
         df_ext_agg = df_ext.groupby('DATA').agg({'LITROS': 'sum', 'CUSTO TOTAL': 'sum'}).reset_index()
-        df_int_agg = df_int.groupby('DATA').agg({'QUANTIDADE DE LITROS': 'sum'}).reset_index()
+        df_int_agg = df_int_consumo.groupby('DATA').agg({'QUANTIDADE DE LITROS': 'sum'}).reset_index()
         df_val_agg = df_val.groupby('DATA').agg({'VALOR_TOTAL': 'sum'}).reset_index()
 
         df_preco_medio_int = pd.merge(df_val_agg, df_int_agg, on='DATA', how='inner')
@@ -227,6 +238,17 @@ def main():
         st.plotly_chart(px.line(df_int_agg, x='DATA', y='QUANTIDADE DE LITROS', markers=True, title='Litros Consumidos (Interno)'), use_container_width=True)
         st.plotly_chart(px.line(df_val_agg, x='DATA', y='VALOR_TOTAL', markers=True, title='Custo Total (Interno)'), use_container_width=True)
         st.plotly_chart(px.line(df_preco_medio_int, x='DATA', y='PRECO_MEDIO', markers=True, title='Preço Médio do Combustível (Interno) [R$/Litro]'), use_container_width=True)
+
+    with tab5:
+        st.markdown("### 💰 Preço Médio Pago por Litro de Diesel")
+        preco_medio_global = df_entrada_merge['PRECO_MEDIO_LITRO'].mean()
+        st.metric('🛢️ Valor Médio Pago (R$/L)', f'R$ {preco_medio_global:.2f}')
+        fig_preco_litro = px.line(df_entrada_merge, x='DATA', y='PRECO_MEDIO_LITRO',
+                                  markers=True,
+                                  title='Evolução do Preço Médio por Litro (Diesel no Tanque)',
+                                  labels={'PRECO_MEDIO_LITRO': 'R$/Litro'})
+        fig_preco_litro.update_traces(line_color='orange')
+        st.plotly_chart(fig_preco_litro, use_container_width=True)
 
 if __name__ == '__main__':
     main()
