@@ -62,10 +62,10 @@ def main():
     st.markdown("<h1 style='text-align:center;'>⛽ Abastecimento Interno vs Externo</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:gray;'>Análise comparativa de consumo, custo e eficiência por veículo</p>", unsafe_allow_html=True)
 
-   with st.expander('📁 Carregar bases de dados (Clique para ver instruções)'):
+  with st.expander('📁 Carregar bases de dados (Clique para ver instruções)'):
     st.markdown("""
     **📝 Formato das planilhas:**  
-    - **Base Externa**: Deve conter as colunas `DATA`, `PLACA`, `LITROS`, `CUSTO TOTAL`.  
+    - **Base Externa**: Deve conter as colunas `DATA`, `PLACA`, `CONSUMO`, `CUSTO TOTAL`.  
     - **Base Interna**: Deve conter as colunas `DATA`, `PLACA`, `QUANTIDADE DE LITROS`.  
     - **Base Combustível**: Deve conter as colunas `EMISSÃO`, `VALOR`.  
     """)
@@ -73,7 +73,7 @@ def main():
     up_ext = c1.file_uploader('Base Externa', type=['csv', 'xlsx'])
     up_int = c2.file_uploader('Base Interna', type=['csv', 'xlsx'])
     up_val = c3.file_uploader('Base Combustível (Valores)', type=['csv', 'xlsx'])
-
+      
     if not (up_ext and up_int and up_val):
         st.info('⚠️ Envie as três bases antes de prosseguir.')
         return
