@@ -39,7 +39,7 @@ def normalizar_placa(placa):
 def remover_placas_invalidas(df):
     if 'PLACA' in df.columns:
         df['PLACA'] = df['PLACA'].apply(normalizar_placa)
-        df = df[df['PLACA'].notna() & (df['PLACA'] != '') & (df['PLACA'] != '-') & (df['PLACA'] != 'CORRECAO')]
+        df = df[df['PLACA'].notna() & (df['PLACA'] != '') & (df['PLACA'] != '-')]
     return df
 
 def main():
@@ -70,51 +70,35 @@ def main():
     df_int = remover_placas_invalidas(df_int)
     df_val = remover_placas_invalidas(df_val)
 
-    # Validar colunas mínimas
     if 'CONSUMO' not in df_ext.columns or 'DATA' not in df_ext.columns:
         st.error("A base externa deve conter as colunas 'CONSUMO' e 'DATA'.")
         return
+
+    df_ext.rename(columns={'CONSUMO': 'LITROS'}, inplace=True)
+    df_ext['LITROS'] = pd.to_numeric(df_ext['LITROS'].apply(tratar_litros), errors='coerce').fillna(0.0)
+    df_ext['DATA'] = pd.to_datetime(df_ext['DATA'], dayfirst=True, errors='coerce')
 
     if 'DATA' not in df_int.columns:
         st.error("A base interna deve conter a coluna 'DATA'.")
         return
 
-    # Tratar colunas externas
-    df_ext.rename(columns={'CONSUMO': 'LITROS'}, inplace=True)
-    df_ext['LITROS'] = pd.to_numeric(df_ext['LITROS'].apply(tratar_litros), errors='coerce').fillna(0.0)
-    df_ext['DATA'] = pd.to_datetime(df_ext['DATA'], dayfirst=True, errors='coerce')
-
-    # Tratar colunas internas
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
-    df_int['QUANTIDADE DE LITROS'] = pd.to_numeric(df_int.get('QUANTIDADE DE LITROS'), errors='coerce').fillna(0.0)
-    df_int['TIPO'] = df_int['TIPO'].astype(str).str.upper()
 
-    # Base combustível - data EMISSÃO
-    if 'EMISSÃO' in df_val.columns:
-        df_val['DATA'] = pd.to_datetime(df_val['EMISSÃO'], dayfirst=True, errors='coerce')
-    else:
-        st.error("Coluna 'EMISSÃO' não encontrada na base de valores.")
+    data_val_col = next((c for c in df_val.columns if 'DATA' in c or 'DT.' in c), None)
+    if not data_val_col:
+        st.error("Coluna de data não encontrada na base de valores.")
         return
+    df_val['DATA'] = pd.to_datetime(df_val[data_val_col], dayfirst=True, errors='coerce')
 
-    val_col = next((c for c in df_val.columns if 'VALOR' in c), None)
-    if not val_col:
-        st.error("Coluna de valor não encontrada na base de valores.")
-        return
-    df_val['VALOR_TOTAL'] = df_val[val_col].apply(tratar_valor)
-
-    # Definir intervalo de datas comum para filtros
     ini_min = min(df_ext['DATA'].min(), df_int['DATA'].min(), df_val['DATA'].min()).date()
     fim_max = max(df_ext['DATA'].max(), df_int['DATA'].max(), df_val['DATA'].max()).date()
-
     ini, fim = st.slider('📅 Selecione o Período:', min_value=ini_min, max_value=fim_max,
                         value=(ini_min, fim_max), format='DD/MM/YYYY')
 
-    # Filtrar por período
     df_ext = df_ext[(df_ext['DATA'].dt.date >= ini) & (df_ext['DATA'].dt.date <= fim)]
     df_int = df_int[(df_int['DATA'].dt.date >= ini) & (df_int['DATA'].dt.date <= fim)]
     df_val = df_val[(df_val['DATA'].dt.date >= ini) & (df_val['DATA'].dt.date <= fim)]
 
-    # Filtrar por tipo combustível na base externa (se existir)
     combustivel_col = next((col for col in df_ext.columns if 'DESCRIÇÃO' in col or 'DESCRI' in col), None)
     if combustivel_col:
         df_ext[combustivel_col] = df_ext[combustivel_col].astype(str).str.strip()
@@ -127,54 +111,47 @@ def main():
     with st.sidebar:
         st.header("Filtros Gerais")
         filtro_combustivel = st.selectbox('🛢️ Tipo de Combustível:', ['Todos'] + tipos_combustivel) if tipos_combustivel else 'Todos'
-
         placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique().tolist())
-        placas = [p for p in placas if p not in ('CORRECAO', '-', '')]  # remover inválidas
         filtro_placa = st.selectbox('🚗 Placa:', ['Todas'] + placas)
 
-    # Aplicar filtro combustível na base externa
     if filtro_combustivel != 'Todos':
         df_ext = df_ext[df_ext[combustivel_col] == filtro_combustivel]
 
-    # Aplicar filtro placa em todas as bases
     if filtro_placa != 'Todas':
         df_ext = df_ext[df_ext['PLACA'] == filtro_placa]
         df_int = df_int[df_int['PLACA'] == filtro_placa]
-        df_val['PLACA'] = df_val['PLACA'].apply(normalizar_placa)
-        df_val = df_val[df_val['PLACA'] == filtro_placa]
 
-    # Tratar colunas numéricas para cálculos
+        if 'PLACA' in df_val.columns:
+            df_val['PLACA'] = df_val['PLACA'].apply(normalizar_placa)
+            df_val = df_val[df_val['PLACA'] == filtro_placa]
+        else:
+            st.warning("⚠️ A base de valores não contém a coluna 'PLACA'. Filtro de placa não aplicado nessa base.")
+
     df_ext['KM ATUAL'] = pd.to_numeric(df_ext.get('KM ATUAL'), errors='coerce')
     df_ext['CUSTO TOTAL'] = df_ext['CUSTO TOTAL'].apply(tratar_valor)
     df_int['KM ATUAL'] = pd.to_numeric(df_int.get('KM ATUAL'), errors='coerce')
+    df_int['QUANTIDADE DE LITROS'] = pd.to_numeric(df_int.get('QUANTIDADE DE LITROS'), errors='coerce').fillna(0.0)
 
-    # Separar entradas e saídas na base interna
-    df_int_entrada = df_int[df_int['TIPO'] == 'ENTRADA']
-    df_int_saida = df_int[df_int['TIPO'] == 'SAÍDA']
+    val_col = next((c for c in df_val.columns if 'VALOR' in c), None)
+    df_val['VALOR_TOTAL'] = df_val[val_col].apply(tratar_valor) if val_col else 0.0
 
-    # Somar litros e valores
     litros_ext = df_ext['LITROS'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
-    litros_int = df_int_entrada['QUANTIDADE DE LITROS'].sum()  # só entrada para cruzar com valor
+    litros_int = df_int['QUANTIDADE DE LITROS'].sum()
     valor_int = df_val['VALOR_TOTAL'].sum()
-
     total_litros = litros_ext + litros_int
     perc_ext = (litros_ext / total_litros * 100) if total_litros > 0 else 0
     perc_int = (litros_int / total_litros * 100) if total_litros > 0 else 0
-
-    # Calcular preço médio diesel interno (valor pago / litros entrada)
-    preco_medio_int = valor_int / litros_int if litros_int > 0 else 0
 
     tab1, tab2, tab3, tab4 = st.tabs(['📊 Resumo Geral', '🚚 Top 10 Veículos', '⚙️ Consumo Médio', '📈 Tendências Temporais'])
 
     with tab1:
         st.markdown(f"### 📆 Período Selecionado: `{ini.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}`")
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric('⛽ Litros (Externo)', f'{litros_ext:,.2f} L', delta=f'{perc_ext:.1f} %')
         c2.metric('💸 Custo (Externo)', f'R$ {valor_ext:,.2f}')
         c3.metric('⛽ Litros (Interno)', f'{litros_int:,.2f} L', delta=f'{perc_int:.1f} %')
         c4.metric('💸 Custo (Interno)', f'R$ {valor_int:,.2f}')
-        c5.metric('💰 Preço Médio Diesel Interno (R$/L)', f'R$ {preco_medio_int:.3f}')
 
         df_kpi = pd.DataFrame({
             'Métrica': ['Litros', 'Custo'],
@@ -189,7 +166,7 @@ def main():
 
     with tab2:
         top_ext = df_ext.groupby('PLACA')['LITROS'].sum().nlargest(10).reset_index()
-        top_int = df_int_entrada.groupby('PLACA')['QUANTIDADE DE LITROS'].sum().nlargest(10).reset_index()
+        top_int = df_int.groupby('PLACA')['QUANTIDADE DE LITROS'].sum().nlargest(10).reset_index()
 
         col1, col2 = st.columns(2)
         fig1 = px.bar(top_ext, y='PLACA', x='LITROS', orientation='h',
@@ -205,7 +182,7 @@ def main():
     with tab3:
         df_comb = pd.concat([
             df_ext[['PLACA', 'DATA', 'KM ATUAL', 'LITROS']].rename(columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'LITROS': 'litros'}),
-            df_int_saida[['PLACA', 'DATA', 'KM ATUAL', 'QUANTIDADE DE LITROS']].rename(columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'QUANTIDADE DE LITROS': 'litros'})
+            df_int[['PLACA', 'DATA', 'KM ATUAL', 'QUANTIDADE DE LITROS']].rename(columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'QUANTIDADE DE LITROS': 'litros'})
         ])
         df_comb = df_comb.dropna(subset=['placa', 'data', 'km_atual', 'litros']).sort_values(['placa', 'data'])
         df_comb['km_diff'] = df_comb.groupby('placa')['km_atual'].diff()
@@ -238,7 +215,7 @@ def main():
         st.markdown("### 📈 Tendência de Consumo, Custo e Preço Médio ao longo do Tempo")
 
         df_ext_agg = df_ext.groupby('DATA').agg({'LITROS': 'sum', 'CUSTO TOTAL': 'sum'}).reset_index()
-        df_int_agg = df_int_saida.groupby('DATA').agg({'QUANTIDADE DE LITROS': 'sum'}).reset_index()
+        df_int_agg = df_int.groupby('DATA').agg({'QUANTIDADE DE LITROS': 'sum'}).reset_index()
         df_val_agg = df_val.groupby('DATA').agg({'VALOR_TOTAL': 'sum'}).reset_index()
 
         df_preco_medio_int = pd.merge(df_val_agg, df_int_agg, on='DATA', how='inner')
@@ -253,3 +230,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
