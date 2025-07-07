@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import datetime
 
 st.set_page_config(page_title='⛽ Dashboard de Abastecimento', layout='wide')
 
@@ -57,7 +56,7 @@ def main():
     for df in [df_ext, df_int, df_val]:
         df.columns = df.columns.str.strip().str.upper()
 
-    # Validações base externa
+    # Validação colunas essenciais
     if 'CONSUMO' not in df_ext.columns or 'DATA' not in df_ext.columns:
         st.error("A base externa deve conter as colunas 'CONSUMO' e 'DATA'.")
         return
@@ -66,14 +65,14 @@ def main():
     df_ext['LITROS'] = pd.to_numeric(df_ext['LITROS'].apply(tratar_litros), errors='coerce').fillna(0.0)
     df_ext['DATA'] = pd.to_datetime(df_ext['DATA'], dayfirst=True, errors='coerce')
 
-    # Validação base interna
     if 'DATA' not in df_int.columns:
         st.error("A base interna deve conter a coluna 'DATA'.")
         return
+
     df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
 
-    # Base valores - Data e Valor, com nomes fixos EMISSÃO e VALOR
+    # Para df_val as colunas exatas de data e valor são "EMISSÃO" e "VALOR"
     if 'EMISSÃO' not in df_val.columns or 'VALOR' not in df_val.columns:
         st.error("A base de valores deve conter as colunas 'EMISSÃO' e 'VALOR'.")
         return
@@ -81,44 +80,41 @@ def main():
     df_val['DATA'] = pd.to_datetime(df_val['EMISSÃO'], dayfirst=True, errors='coerce')
     df_val['VALOR_TOTAL'] = df_val['VALOR'].apply(tratar_valor)
 
-    # Filtrar a partir de 2023
-    data_inicio_2023 = datetime.date(2023, 1, 1)
-    df_ext = df_ext[df_ext['DATA'].dt.date >= data_inicio_2023]
-    df_int = df_int[df_int['DATA'].dt.date >= data_inicio_2023]
-    df_val = df_val[df_val['DATA'].dt.date >= data_inicio_2023]
+    # Filtro de data a partir de 2023-01-01
+    data_inicio = pd.to_datetime('2023-01-01')
+    df_ext = df_ext[df_ext['DATA'] >= data_inicio]
+    df_int = df_int[df_int['DATA'] >= data_inicio]
+    df_val = df_val[df_val['DATA'] >= data_inicio]
 
-    ini_min = max(data_inicio_2023, min(df_ext['DATA'].min(), df_int['DATA'].min(), df_val['DATA'].min()).date())
-    fim_max = max(df_ext['DATA'].max(), df_int['DATA'].max(), df_val['DATA'].max()).date()
-
-    ini, fim = st.slider('📅 Selecione o Período:', min_value=ini_min, max_value=fim_max,
-                         value=(ini_min, fim_max), format='DD/MM/YYYY')
-
-    df_ext = df_ext[(df_ext['DATA'].dt.date >= ini) & (df_ext['DATA'].dt.date <= fim)]
-    df_int = df_int[(df_int['DATA'].dt.date >= ini) & (df_int['DATA'].dt.date <= fim)]
-    df_val = df_val[(df_val['DATA'].dt.date >= ini) & (df_val['DATA'].dt.date <= fim)]
-
-    combustivel_col = next((col for col in df_ext.columns if 'DESCRIÇÃO' in col or 'DESCRI' in col), None)
+    # Coluna combustível na base externa (exemplo: "DESCRIÇÃO DO ABASTECIMENTO")
+    combustivel_col = next((col for col in df_ext.columns if 'DESCRI' in col), None)
     if combustivel_col:
         df_ext[combustivel_col] = df_ext[combustivel_col].astype(str).str.strip()
         df_ext = df_ext[~df_ext[combustivel_col].str.lower().isin(['nan', '', 'none'])]
-        tipos_combustivel = sorted(df_ext[combustivel_col].dropna().unique())
-    else:
-        st.warning('⚠️ Coluna de tipo de combustível não encontrada na base externa.')
-        tipos_combustivel = []
 
+    # Filtros globais na sidebar
     with st.sidebar:
         st.header("Filtros Gerais")
-        filtro_combustivel = st.selectbox('🛢️ Tipo de Combustível:', ['Todos'] + tipos_combustivel if tipos_combustivel else ['Todos'])
+        # Tipo combustível filtro
+        if combustivel_col:
+            tipos_combustivel = sorted(df_ext[combustivel_col].dropna().unique())
+            filtro_combustivel = st.selectbox('🛢️ Tipo de Combustível:', ['Todos'] + tipos_combustivel)
+        else:
+            filtro_combustivel = 'Todos'
+
         placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique())
         filtro_placa = st.selectbox('🚗 Placa:', ['Todas'] + placas)
 
-    if filtro_combustivel != 'Todos':
+    # Aplicar filtros globais
+    if filtro_combustivel != 'Todos' and combustivel_col:
         df_ext = df_ext[df_ext[combustivel_col] == filtro_combustivel]
     if filtro_placa != 'Todas':
         df_ext = df_ext[df_ext['PLACA'] == filtro_placa]
         df_int = df_int[df_int['PLACA'] == filtro_placa]
-        df_val = df_val[df_val['PLACA'] == filtro_placa] if 'PLACA' in df_val.columns else df_val
+        if 'PLACA' in df_val.columns:
+            df_val = df_val[df_val['PLACA'] == filtro_placa]
 
+    # Normalizações e conversões
     df_ext['PLACA'] = df_ext['PLACA'].astype(str).str.upper().str.strip()
     df_int['PLACA'] = df_int['PLACA'].astype(str).str.upper().str.strip()
     df_ext['KM ATUAL'] = pd.to_numeric(df_ext.get('KM ATUAL'), errors='coerce')
@@ -126,6 +122,7 @@ def main():
     df_int['KM ATUAL'] = pd.to_numeric(df_int.get('KM ATUAL'), errors='coerce')
     df_int['QUANTIDADE DE LITROS'] = pd.to_numeric(df_int.get('QUANTIDADE DE LITROS'), errors='coerce').fillna(0.0)
 
+    # Somas gerais
     litros_ext = df_ext['LITROS'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
     litros_int = df_int['QUANTIDADE DE LITROS'].sum()
@@ -143,7 +140,7 @@ def main():
     ])
 
     with tab1:
-        st.markdown(f"### 📆 Período Selecionado: `{ini.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}`")
+        st.markdown(f"### 📆 Período: a partir de 01/01/2023")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric('⛽ Litros (Externo)', f'{litros_ext:,.2f} L', delta=f'{perc_ext:.1f} %')
         c2.metric('💸 Custo (Externo)', f'R$ {valor_ext:,.2f}')
@@ -226,9 +223,14 @@ def main():
         df_int_agg = df_int.groupby('DATA').agg({'QUANTIDADE DE LITROS':'sum'}).reset_index()
         df_val_agg = df_val.groupby('DATA').agg({'VALOR_TOTAL':'sum'}).reset_index()
 
+        # Renomear para evitar conflitos no merge
+        df_int_agg = df_int_agg.rename(columns={'QUANTIDADE DE LITROS': 'QTDE_LITROS'})
+
+        # Merge para cálculo do preço médio interno
         df_preco_medio_int = pd.merge(df_val_agg, df_int_agg, on='DATA', how='inner')
+
         df_preco_medio_int['PRECO_MEDIO'] = df_preco_medio_int.apply(
-            lambda row: row['VALOR_TOTAL'] / row['QUANTIDADE DE LITROS'] if row['QUANTIDADE_DE_LITROS'] > 0 else 0, axis=1)
+            lambda row: row['VALOR_TOTAL'] / row['QTDE_LITROS'] if row['QTDE_LITROS'] > 0 else 0, axis=1)
 
         fig_ext_litros = px.line(df_ext_agg, x='DATA', y='LITROS', markers=True,
                                  title='Litros Consumidos (Externo)', labels={'LITROS':'Litros', 'DATA':'Data'})
@@ -238,8 +240,8 @@ def main():
                                 title='Custo Total (Externo)', labels={'CUSTO TOTAL':'R$', 'DATA':'Data'})
         st.plotly_chart(fig_ext_custo, use_container_width=True)
 
-        fig_int_litros = px.line(df_int_agg, x='DATA', y='QUANTIDADE DE LITROS', markers=True,
-                                 title='Litros Consumidos (Interno)', labels={'QUANTIDADE_DE_LITROS':'Litros', 'DATA':'Data'})
+        fig_int_litros = px.line(df_int_agg, x='DATA', y='QTDE_LITROS', markers=True,
+                                 title='Litros Consumidos (Interno)', labels={'QTDE_LITROS':'Litros', 'DATA':'Data'})
         st.plotly_chart(fig_int_litros, use_container_width=True)
 
         fig_int_custo = px.line(df_val_agg, x='DATA', y='VALOR_TOTAL', markers=True,
