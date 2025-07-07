@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import datetime
 
 st.set_page_config(page_title='⛽ Dashboard de Abastecimento', layout='wide')
 
@@ -71,20 +72,26 @@ def main():
     df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
 
-    # Escolha interativa da coluna data na base de valores (sem exibir lista nem mensagem sucesso)
     data_val_col = st.selectbox(
         "Selecione a coluna de data da base de valores:",
         options=df_val.columns.tolist()
     )
-
     df_val['DATA'] = pd.to_datetime(df_val[data_val_col], dayfirst=True, errors='coerce')
 
     if df_val['DATA'].isnull().all():
         st.error("A coluna selecionada não contém dados de data válidos.")
         return
 
-    ini_min = min(df_ext['DATA'].min(), df_int['DATA'].min(), df_val['DATA'].min()).date()
+    # FILTRO AUTOMÁTICO: Apenas dados de 2023 em diante
+    data_inicio_2023 = datetime.date(2023, 1, 1)
+
+    df_ext = df_ext[df_ext['DATA'].dt.date >= data_inicio_2023]
+    df_int = df_int[df_int['DATA'].dt.date >= data_inicio_2023]
+    df_val = df_val[df_val['DATA'].dt.date >= data_inicio_2023]
+
+    ini_min = max(data_inicio_2023, min(df_ext['DATA'].min(), df_int['DATA'].min(), df_val['DATA'].min()).date())
     fim_max = max(df_ext['DATA'].max(), df_int['DATA'].max(), df_val['DATA'].max()).date()
+
     ini, fim = st.slider('📅 Selecione o Período:', min_value=ini_min, max_value=fim_max,
                         value=(ini_min, fim_max), format='DD/MM/YYYY')
 
@@ -101,7 +108,6 @@ def main():
         st.warning('⚠️ Coluna de tipo de combustível não encontrada na base externa.')
         tipos_combustivel = []
 
-    # Filtros globais que influenciam todas as abas
     filtro_combustivel = None
     filtro_placa = None
 
@@ -115,7 +121,6 @@ def main():
         placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique())
         filtro_placa = st.selectbox('🚗 Placa:', ['Todas'] + placas)
 
-    # Aplicar filtros globais
     if filtro_combustivel != 'Todos':
         df_ext = df_ext[df_ext[combustivel_col] == filtro_combustivel]
     if filtro_placa != 'Todas':
@@ -123,7 +128,6 @@ def main():
         df_int = df_int[df_int['PLACA'] == filtro_placa]
         df_val = df_val[df_val['PLACA'] == filtro_placa] if 'PLACA' in df_val.columns else df_val
 
-    # Normalizações
     df_ext['PLACA'] = df_ext['PLACA'].astype(str).str.upper().str.strip()
     df_int['PLACA'] = df_int['PLACA'].astype(str).str.upper().str.strip()
     df_ext['KM ATUAL'] = pd.to_numeric(df_ext.get('KM ATUAL'), errors='coerce')
@@ -234,7 +238,6 @@ def main():
         df_int_agg = df_int.groupby('DATA').agg({'QUANTIDADE DE LITROS':'sum'}).reset_index()
         df_val_agg = df_val.groupby('DATA').agg({'VALOR_TOTAL':'sum'}).reset_index()
 
-        # Preço médio interno R$/litro
         df_preco_medio_int = pd.merge(df_val_agg, df_int_agg, on='DATA', how='inner')
         df_preco_medio_int['PRECO_MEDIO'] = df_preco_medio_int.apply(
             lambda row: row['VALOR_TOTAL'] / row['QUANTIDADE DE LITROS'] if row['QUANTIDADE DE LITROS'] > 0 else 0, axis=1)
