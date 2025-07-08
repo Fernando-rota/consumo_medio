@@ -1,16 +1,12 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import datetime # Importado para lidar com datas e períodos
+import datetime
 
 st.set_page_config(page_title='⛽ Dashboard de Abastecimento', layout='wide')
 
 @st.cache_data(show_spinner=False)
 def carregar_base(file, nome):
-    """
-    Carrega e retorna um DataFrame a partir de arquivos CSV ou XLSX.
-    Lida com diferentes delimitadores para CSV e erros de carregamento.
-    """
     try:
         if file.name.lower().endswith('.csv'):
             try:
@@ -18,7 +14,7 @@ def carregar_base(file, nome):
             except:
                 df = pd.read_csv(file, sep=';', engine='python')
         else:
-            import openpyxl # Importação necessária para ler .xlsx
+            import openpyxl
             df = pd.read_excel(file, engine='openpyxl')
         df.columns = df.columns.str.strip()
         return df
@@ -27,20 +23,12 @@ def carregar_base(file, nome):
         return None
 
 def tratar_valor(x):
-    """
-    Converte strings de valor monetário (ex: 'R$ 1.234,56') para float.
-    Retorna 0.0 se a conversão falhar.
-    """
     try:
         return float(str(x).replace('R$', '').replace('.', '').replace(',', '.').strip())
     except:
         return 0.0
 
 def tratar_litros(x):
-    """
-    Converte strings de litros (ex: '1.234,56') para float.
-    Retorna 0.0 se a conversão falhar.
-    """
     try:
         return float(str(x).replace('.', '').replace(',', '.'))
     except:
@@ -56,67 +44,56 @@ def main():
         up_int = c2.file_uploader('Base Interna', type=['csv', 'xlsx'])
         up_val = c3.file_uploader('Base Combustível (Valores)', type=['csv', 'xlsx'])
 
-    # Verifica se todas as bases foram carregadas antes de prosseguir
     if not (up_ext and up_int and up_val):
         st.info('⚠️ Envie as três bases antes de prosseguir.')
         return
 
-    # Carrega as bases de dados
     df_ext = carregar_base(up_ext, 'Base Externa')
     df_int = carregar_base(up_int, 'Base Interna')
     df_val = carregar_base(up_val, 'Base Combustível (Valores)')
 
-    # Retorna se alguma base falhou ao carregar
     if df_ext is None or df_int is None or df_val is None:
         return
 
-    # Padroniza nomes de colunas para maiúsculas e remove espaços
     for df in [df_ext, df_int, df_val]:
         df.columns = df.columns.str.strip().str.upper()
 
-    # Valida colunas essenciais na base externa
     if 'CONSUMO' not in df_ext.columns or 'DATA' not in df_ext.columns:
         st.error("A base externa deve conter as colunas 'CONSUMO' e 'DATA'.")
         return
 
-    # Trata a base externa
     df_ext.rename(columns={'CONSUMO': 'LITROS'}, inplace=True)
     df_ext['LITROS'] = pd.to_numeric(df_ext['LITROS'].apply(tratar_litros), errors='coerce').fillna(0.0)
+    # É crucial que esta conversão seja robusta para o filtro de data funcionar
     df_ext['DATA'] = pd.to_datetime(df_ext['DATA'], dayfirst=True, errors='coerce')
 
-    # Valida colunas essenciais na base interna
     if 'DATA' not in df_int.columns:
         st.error("A base interna deve conter a coluna 'DATA'.")
         return
 
-    # Trata a base interna
-    df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-'] # Remove placas inválidas
+    df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
+    # É crucial que esta conversão seja robusta para o filtro de data funcionar
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
 
-    # Valida colunas essenciais na base de valores
     if 'EMISSÃO' not in df_val.columns or 'VALOR' not in df_val.columns:
         st.error("A base de valores deve conter as colunas 'EMISSÃO' e 'VALOR'.")
         return
 
-    # Trata a base de valores
+    # É crucial que esta conversão seja robusta para o filtro de data funcionar
     df_val['DATA'] = pd.to_datetime(df_val['EMISSÃO'], dayfirst=True, errors='coerce')
     df_val['VALOR'] = df_val['VALOR'].apply(tratar_valor)
 
-    # Remove linhas com 'DATA' NaN após a conversão, pois são inválidas para o filtro
+    # Remove linhas com 'DATA' NaN após a conversão para garantir que o filtro funcione com datas válidas
     df_ext.dropna(subset=['DATA'], inplace=True)
     df_int.dropna(subset=['DATA'], inplace=True)
     df_val.dropna(subset=['DATA'], inplace=True)
 
-    # --- INÍCIO DA ALTERAÇÃO DO FILTRO DE DATA ---
     st.sidebar.header('📅 Filtro de Data')
 
-    # Calcula as datas mínimas e máximas disponíveis nos dados para o date_input
-    # Garante que as datas de referência existam e sejam válidas
     all_dates = pd.concat([df_ext['DATA'], df_int['DATA'], df_val['DATA']]).dropna()
     min_data_available = all_dates.min().date() if not all_dates.empty else datetime.date(2023, 1, 1)
     max_data_available = all_dates.max().date() if not all_dates.empty else datetime.date.today()
 
-    # Define as opções de período para o selectbox
     opcoes_periodo = [
         'Intervalo Personalizado',
         'Hoje',
@@ -134,7 +111,6 @@ def main():
     start_date_filter = min_data_available
     end_date_filter = max_data_available
 
-    # Lógica para definir o intervalo de datas com base na seleção rápida
     if periodo_selecionado == 'Hoje':
         start_date_filter = today
         end_date_filter = today
@@ -159,38 +135,29 @@ def main():
         start_date_filter = today.replace(month=1, day=1)
         end_date_filter = today
 
-    # Se o usuário escolher "Intervalo Personalizado", exibe o date_input
     if periodo_selecionado == 'Intervalo Personalizado':
-        # Define o valor inicial do date_input com base nas datas disponíveis nos dados
         data_selecao_manual = st.sidebar.date_input(
             'Ou selecione as datas manualmente:',
-            value=(min_data_available, max_data_available), # Valor inicial do date_input
+            value=(min_data_available, max_data_available),
             min_value=min_data_available,
             max_value=max_data_available
         )
-        # O st.date_input retorna uma tupla ou uma única data, precisamos garantir que seja uma tupla (start, end)
         if len(data_selecao_manual) == 2:
             start_date_filter = data_selecao_manual[0]
             end_date_filter = data_selecao_manual[1]
         elif len(data_selecao_manual) == 1:
-            # Se apenas uma data for selecionada, considera um intervalo de um dia
             start_date_filter = data_selecao_manual[0]
             end_date_filter = data_selecao_manual[0]
         else:
-            # Caso não haja seleção válida, mantém o intervalo completo dos dados
-            pass
-    
-    # Garante que as datas de filtro estejam dentro do intervalo real dos dados
+            pass # Caso raro, mantém o intervalo já definido
+
     start_date_filter = max(start_date_filter, min_data_available)
     end_date_filter = min(end_date_filter, max_data_available)
 
-    # Aplica o filtro de data nas bases de dados
     df_ext = df_ext[(df_ext['DATA'].dt.date >= start_date_filter) & (df_ext['DATA'].dt.date <= end_date_filter)]
     df_int = df_int[(df_int['DATA'].dt.date >= start_date_filter) & (df_int['DATA'].dt.date <= end_date_filter)]
     df_val = df_val[(df_val['DATA'].dt.date >= start_date_filter) & (df_val['DATA'].dt.date <= end_date_filter)]
-    # --- FIM DA ALTERAÇÃO DO FILTRO DE DATA ---
 
-    # Encontra a coluna de combustível (se existir)
     combustivel_col = next((col for col in df_ext.columns if 'DESCRI' in col), None)
     if combustivel_col:
         df_ext[combustivel_col] = df_ext[combustivel_col].astype(str).str.strip()
@@ -198,27 +165,23 @@ def main():
 
     st.sidebar.header("Filtros Gerais")
 
-    # Filtro de tipo de combustível
     if combustivel_col:
         tipos_combustivel = sorted(df_ext[combustivel_col].dropna().unique())
         filtro_combustivel = st.sidebar.selectbox('🛢️ Tipo de Combustível:', ['Todos'] + tipos_combustivel)
     else:
         filtro_combustivel = 'Todos'
 
-    # Filtro de placa
     placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique())
     filtro_placa = st.sidebar.selectbox('🚗 Placa:', ['Todas'] + placas)
 
-    # Aplica filtros de combustível e placa
     if filtro_combustivel != 'Todos' and combustivel_col:
         df_ext = df_ext[df_ext[combustivel_col] == filtro_combustivel]
     if filtro_placa != 'Todas':
         df_ext = df_ext[df_ext['PLACA'] == filtro_placa]
         df_int = df_int[df_int['PLACA'] == filtro_placa]
-        if 'PLACA' in df_val.columns: # A base de valores pode não ter placa
+        if 'PLACA' in df_val.columns:
             df_val = df_val[df_val['PLACA'] == filtro_placa]
 
-    # Tratamento final das colunas e cálculos de KPIs
     df_ext['PLACA'] = df_ext['PLACA'].astype(str).str.upper().str.strip()
     df_int['PLACA'] = df_int['PLACA'].astype(str).str.upper().str.strip()
     df_ext['KM ATUAL'] = pd.to_numeric(df_ext.get('KM ATUAL'), errors='coerce')
@@ -226,7 +189,6 @@ def main():
     df_int['KM ATUAL'] = pd.to_numeric(df_int.get('KM ATUAL'), errors='coerce')
     df_int['QUANTIDADE DE LITROS'] = pd.to_numeric(df_int.get('QUANTIDADE DE LITROS'), errors='coerce').fillna(0.0)
 
-    # Calcula totais de litros e custos
     litros_ext = df_ext['LITROS'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
     litros_int = df_int['QUANTIDADE DE LITROS'].sum()
@@ -236,7 +198,6 @@ def main():
     perc_ext = (litros_ext / total_litros * 100) if total_litros > 0 else 0
     perc_int = (litros_int / total_litros * 100) if total_litros > 0 else 0
 
-    # Cria as abas do dashboard
     tab1, tab2, tab3, tab4 = st.tabs([
         '📊 Resumo Geral',
         '🚚 Top 10 Veículos',
@@ -245,8 +206,9 @@ def main():
     ])
 
     with tab1:
-        # Exibe o período selecionado dinamicamente
-        st.markdown(f"### 📆 Período Selecionado: `{start_date_filter.strftime('%d/%m/%Y')} a {end_date_filter.strftime('%d/%m/%Y')}`")
+        # AQUI ESTÁ A MUDANÇA PARA O FORMATO BRASILEIRO (DD/MM/YYYY)
+        st.markdown(f"### 📆 Período Selecionado: "
+                    f"`{start_date_filter.strftime('%d/%m/%Y')} a {end_date_filter.strftime('%d/%m/%Y')}`")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric('⛽ Litros (Externo)', f'{litros_ext:,.2f} L', delta=f'{perc_ext:.1f} %')
         c2.metric('💸 Custo (Externo)', f'R$ {valor_ext:,.2f}')
@@ -286,7 +248,6 @@ def main():
             st.plotly_chart(fig2, use_container_width=True)
 
     with tab3:
-        # Consolida dados para cálculo de consumo médio
         df_comb = pd.concat([
             df_ext[['PLACA', 'DATA', 'KM ATUAL', 'LITROS']].rename(
                 columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'LITROS': 'litros'}),
@@ -295,12 +256,11 @@ def main():
         ])
         df_comb = df_comb.dropna(subset=['placa', 'data', 'km_atual', 'litros']).sort_values(['placa', 'data'])
         df_comb['km_diff'] = df_comb.groupby('placa')['km_atual'].diff()
-        df_comb = df_comb[df_comb['km_diff'] > 0] # Garante que a diferença de KM é positiva
+        df_comb = df_comb[df_comb['km_diff'] > 0]
         df_comb['consumo'] = df_comb['km_diff'] / df_comb['litros']
         consumo_medio = df_comb.groupby('placa')['consumo'].mean().reset_index().rename(columns={'consumo': 'Km/L'})
 
         def classificar(km_l):
-            """Classifica o consumo de combustível."""
             if km_l >= 6:
                 return 'Econômico'
             elif km_l >= 3.5:
@@ -327,20 +287,17 @@ def main():
     with tab4:
         st.markdown("### 📈 Tendência de Consumo, Custo e Preço Médio ao longo do Tempo")
 
-        # Agrega dados por DATA para tendências temporais
         df_ext_agg = df_ext.groupby('DATA').agg({'LITROS':'sum', 'CUSTO TOTAL':'sum'}).reset_index()
         df_int_agg = df_int.groupby('DATA').agg({'QUANTIDADE DE LITROS':'sum'}).reset_index()
         df_val_agg = df_val.groupby('DATA').agg({'VALOR':'sum'}).reset_index()
 
         df_int_agg = df_int_agg.rename(columns={'QUANTIDADE DE LITROS': 'QTDE_LITROS'})
 
-        # Calcula o preço médio interno (somente se houver dados para merge)
         df_preco_medio_int = pd.merge(df_val_agg, df_int_agg, on='DATA', how='inner')
         if not df_preco_medio_int.empty:
             df_preco_medio_int['PRECO_MEDIO'] = df_preco_medio_int.apply(
                 lambda row: row['VALOR'] / row['QTDE_LITROS'] if row['QTDE_LITROS'] > 0 else 0, axis=1)
 
-        # Gráficos de linha para tendências
         fig_ext_litros = px.line(df_ext_agg, x='DATA', y='LITROS', markers=True,
                                  title='Litros Consumidos (Externo)', labels={'LITROS':'Litros', 'DATA':'Data'})
         st.plotly_chart(fig_ext_litros, use_container_width=True)
