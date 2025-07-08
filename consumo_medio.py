@@ -35,7 +35,7 @@ def tratar_litros(x):
         return 0.0
 
 def main():
-    st.markdown("<h1 style='text-align:center;'>⛽ Dashboard de Abastecimento</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center;'>⛽ Abastecimento Interno vs Externo</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:gray;'>Análise comparativa de consumo, custo e eficiência por veículo</p>", unsafe_allow_html=True)
 
     with st.expander('📁 Carregar bases de dados'):
@@ -90,7 +90,6 @@ def main():
     min_data_available = all_dates.min().date() if not all_dates.empty else datetime.date(2023, 1, 1)
     max_data_available = all_dates.max().date() if not all_dates.empty else datetime.date.today()
 
-    # Define um intervalo padrão para o `value` do date_input que englobe o período dos dados
     default_start_date = min_data_available
     default_end_date = max_data_available
 
@@ -141,8 +140,8 @@ def main():
         )
         data_selecao_manual = st.sidebar.date_input(
             'Ou selecione as datas manualmente:',
-            value=(default_start_date, default_end_date), # Usando as datas padrão do período completo
-            min_value=min_data_available, # Limites baseados nos dados carregados
+            value=(default_start_date, default_end_date),
+            min_value=min_data_available,
             max_value=max_data_available
         )
         if len(data_selecao_manual) == 2:
@@ -161,6 +160,9 @@ def main():
     df_int = df_int[(df_int['DATA'].dt.date >= start_date_filter) & (df_int['DATA'].dt.date <= end_date_filter)]
     df_val = df_val[(df_val['DATA'].dt.date >= start_date_filter) & (df_val['DATA'].dt.date <= end_date_filter)]
 
+
+    # --- INÍCIO DAS ALTERAÇÕES PARA FILTRO DE PLACA E DUPLICATAS ---
+
     combustivel_col = next((col for col in df_ext.columns if 'DESCRI' in col), None)
     if combustivel_col:
         df_ext[combustivel_col] = df_ext[combustivel_col].astype(str).str.strip()
@@ -174,16 +176,26 @@ def main():
     else:
         filtro_combustivel = 'Todos'
 
-    placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique())
-    filtro_placa = st.sidebar.selectbox('🚗 Placa:', ['Todas'] + placas)
+    # Correção: Remover duplicatas na lista de placas
+    placas_ext = df_ext['PLACA'].dropna().unique()
+    placas_int = df_int['PLACA'].dropna().unique()
+    # Concatena e remove duplicatas para a lista de seleção
+    todas_placas = pd.Series(list(placas_ext) + list(placas_int)).astype(str).str.upper().str.strip().drop_duplicates().sort_values().tolist()
+
+    filtro_placa = st.sidebar.selectbox('🚗 Placa:', ['Todas'] + todas_placas)
 
     if filtro_combustivel != 'Todos' and combustivel_col:
         df_ext = df_ext[df_ext[combustivel_col] == filtro_combustivel]
+
+    # Aplica o filtro de placa apenas em df_ext e df_int
     if filtro_placa != 'Todas':
         df_ext = df_ext[df_ext['PLACA'] == filtro_placa]
         df_int = df_int[df_int['PLACA'] == filtro_placa]
-        if 'PLACA' in df_val.columns:
-            df_val = df_val[df_val['PLACA'] == filtro_placa]
+        # Removido: A base df_val (valores de combustível) geralmente não é filtrada por placa,
+        # pois contém os preços de compra gerais por data, não por veículo específico.
+        # Se df_val PRECISA ser filtrada por placa, por favor, me informe como as placas se relacionam.
+    # --- FIM DAS ALTERAÇÕES PARA FILTRO DE PLACA E DUPLICATAS ---
+
 
     df_ext['PLACA'] = df_ext['PLACA'].astype(str).str.upper().str.strip()
     df_int['PLACA'] = df_int['PLACA'].astype(str).str.upper().str.strip()
@@ -195,7 +207,7 @@ def main():
     litros_ext = df_ext['LITROS'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
     litros_int = df_int['QUANTIDADE DE LITROS'].sum()
-    valor_int = df_val['VALOR'].sum()
+    valor_int = df_val['VALOR'].sum() # df_val.sum() é a soma dos valores da base de valores de combustível, que já foi filtrada por data.
 
     total_litros = litros_ext + litros_int
     perc_ext = (litros_ext / total_litros * 100) if total_litros > 0 else 0
