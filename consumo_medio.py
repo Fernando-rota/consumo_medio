@@ -8,14 +8,12 @@ st.set_page_config(page_title='⛽ Dashboard de Abastecimento', layout='wide')
 def carregar_base(file, nome):
     try:
         if file.name.lower().endswith('.csv'):
-            try:
-                df = pd.read_csv(file, sep=None, engine='python')
-            except:
-                df = pd.read_csv(file, sep=';', engine='python')
+            df = pd.read_csv(file, sep=None, engine='python')
         else:
             import openpyxl
             df = pd.read_excel(file, engine='openpyxl')
         df.columns = df.columns.str.strip()
+        df = df.loc[:, ~df.columns.str.contains('^Unnamed', case=False)]
         return df
     except Exception as e:
         st.error(f"Erro ao carregar {nome}: {e}")
@@ -53,33 +51,28 @@ def main():
     if df_ext is None or df_int is None or df_val is None:
         return
 
+    # Padronizar colunas
     for df in [df_ext, df_int, df_val]:
         df.columns = df.columns.str.strip().str.upper()
 
-    if 'CONSUMO' not in df_ext.columns or 'DATA' not in df_ext.columns:
-        st.error("Base externa deve conter 'CONSUMO' e 'DATA'")
-        return
-    if 'DATA' not in df_int.columns or 'EMISSÃO' not in df_val.columns or 'VALOR' not in df_val.columns:
-        st.error("Base interna precisa de 'DATA'. Base de valores precisa de 'EMISSÃO' e 'VALOR'")
-        return
+    # Renomear colunas
+    df_ext.rename(columns={'CONSUMO': 'LITROS', 'DESCRIÇÃO DO ABASTECIMENTO': 'COMBUSTIVEL'}, inplace=True)
+    df_int.rename(columns={'KM ATUAL': 'KM ATUAL', 'QUANTIDADE DE LITROS': 'QUANTIDADE DE LITROS'}, inplace=True)
+    df_val.rename(columns={'EMISSÃO': 'DATA'}, inplace=True)
 
-    # Tratamento externo
-    df_ext.rename(columns={'CONSUMO': 'LITROS'}, inplace=True)
-    df_ext['LITROS'] = df_ext['LITROS'].apply(tratar_litros)
+    # Limpar e converter datas
     df_ext['DATA'] = pd.to_datetime(df_ext['DATA'], dayfirst=True, errors='coerce')
-    df_ext['CUSTO TOTAL'] = df_ext['CUSTO TOTAL'].apply(tratar_valor) if 'CUSTO TOTAL' in df_ext.columns else 0
-
-    # Tratamento interno
-    df_int = df_int[df_int['PLACA'].astype(str).str.strip() != '-']
     df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
-    df_int['KM ATUAL'] = pd.to_numeric(df_int.get('KM ATUAL'), errors='coerce')
-    df_int['QUANTIDADE DE LITROS'] = pd.to_numeric(df_int.get('QUANTIDADE DE LITROS'), errors='coerce')
+    df_val['DATA'] = pd.to_datetime(df_val['DATA'], dayfirst=True, errors='coerce')
 
-    # Tratamento de valores
-    df_val['DATA'] = pd.to_datetime(df_val['EMISSÃO'], dayfirst=True, errors='coerce')
+    # Conversão de valores
+    df_ext['LITROS'] = df_ext['LITROS'].apply(tratar_litros)
+    df_ext['CUSTO TOTAL'] = df_ext['CUSTO TOTAL'].apply(tratar_valor)
+    df_int['KM ATUAL'] = pd.to_numeric(df_int['KM ATUAL'], errors='coerce')
+    df_int['QUANTIDADE DE LITROS'] = pd.to_numeric(df_int['QUANTIDADE DE LITROS'], errors='coerce')
     df_val['VALOR'] = df_val['VALOR'].apply(tratar_valor)
 
-    # Filtros
+    # Filtros globais
     min_data = max(pd.Timestamp('2023-01-01'), min(df_ext['DATA'].min(), df_int['DATA'].min(), df_val['DATA'].min()))
     max_data = max(df_ext['DATA'].max(), df_int['DATA'].max(), df_val['DATA'].max())
     data_range = st.sidebar.slider('📆 Período:',
@@ -92,13 +85,13 @@ def main():
     df_int = df_int[(df_int['DATA'].dt.date >= data_range[0]) & (df_int['DATA'].dt.date <= data_range[1])]
     df_val = df_val[(df_val['DATA'].dt.date >= data_range[0]) & (df_val['DATA'].dt.date <= data_range[1])]
 
-    combustivel_col = next((c for c in df_ext.columns if 'DESCRI' in c), None)
-    if combustivel_col:
-        tipos = sorted(df_ext[combustivel_col].dropna().astype(str).str.strip().unique())
-        tipo_sel = st.sidebar.selectbox('🛢 Combustível:', ['Todos'] + tipos)
-        if tipo_sel != 'Todos':
-            df_ext = df_ext[df_ext[combustivel_col] == tipo_sel]
+    # Combustível
+    tipos = sorted(df_ext['COMBUSTIVEL'].dropna().astype(str).unique())
+    tipo_sel = st.sidebar.selectbox('🛢 Combustível:', ['Todos'] + tipos)
+    if tipo_sel != 'Todos':
+        df_ext = df_ext[df_ext['COMBUSTIVEL'] == tipo_sel]
 
+    # Filtro por placa
     placas = sorted(set(df_ext['PLACA'].dropna().unique()) | set(df_int['PLACA'].dropna().unique()))
     placa_sel = st.sidebar.selectbox('🚗 Veículo:', ['Todas'] + sorted(placas))
     if placa_sel != 'Todas':
@@ -107,9 +100,9 @@ def main():
         if 'PLACA' in df_val.columns:
             df_val = df_val[df_val['PLACA'] == placa_sel]
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(['📊 Resumo Geral', '🚚 Top 10', '⚙️ Consumo Médio (km/L)', '📈 Tendência', '📆 Comparativo Mensal'])
+    # Abas
+    tab1, tab2, tab3, tab4 = st.tabs(['📊 Resumo Geral', '⚙️ Consumo Médio', '📈 Tendência', '📆 Comparativo'])
 
-    # Resumo Geral
     with tab1:
         st.subheader('Resumo Geral do Período')
         litros_ext = df_ext['LITROS'].sum()
@@ -128,12 +121,7 @@ def main():
         c4.metric('Custo Interno', f'R$ {valor_int:,.2f}')
         c5.metric('💰 Preço Médio Interno', f'R$ {preco_medio_ponderado:.2f}')
 
-    # Aba 2 - Top 10 veículos (placeholder)
     with tab2:
-        st.info('🚧 Em desenvolvimento: Ranking dos veículos que mais consomem e gastam.')
-
-    # Aba 3 - Consumo Médio
-    with tab3:
         st.subheader('⚙️ Consumo Médio por Veículo')
         df_int_filtrado = df_int.dropna(subset=['PLACA', 'KM ATUAL', 'DATA'])
         df_int_filtrado = df_int_filtrado.sort_values(['PLACA', 'DATA'])
@@ -167,10 +155,8 @@ def main():
                          })
         st.plotly_chart(fig_bar, use_container_width=True)
 
-    # Aba 4 - Tendência Mensal
-    with tab4:
+    with tab3:
         st.subheader('📈 Tendência de Consumo Mensal')
-
         df_ext['MÊS'] = df_ext['DATA'].dt.to_period('M').dt.to_timestamp()
         df_int['MÊS'] = df_int['DATA'].dt.to_period('M').dt.to_timestamp()
 
@@ -189,12 +175,8 @@ def main():
                       markers=True)
         st.plotly_chart(fig, use_container_width=True)
 
-        st.dataframe(litros_mensal.style.format({'Externo': '{:,.2f}', 'Interno': '{:,.2f}', 'Total': '{:,.2f}'}),
-                     use_container_width=True)
-
-    # Aba 5 - Comparativo Mensal (a definir)
-    with tab5:
-        st.info('📅 Em breve: Comparativo mensal de consumo e custo.')
+    with tab4:
+        st.info("📊 Em breve: Comparativo detalhado mensal com custo/litro.")
 
 if __name__ == '__main__':
     main()
