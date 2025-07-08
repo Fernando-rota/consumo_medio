@@ -207,7 +207,12 @@ def main():
     litros_ext = df_ext['LITROS'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
     litros_int = df_int['QUANTIDADE DE LITROS'].sum()
-    valor_int = df_val['VALOR'].sum() # df_val.sum() é a soma dos valores da base de valores de combustível, que já foi filtrada por data.
+    valor_int = df_val['VALOR'].sum()
+
+    # Cálculo do Preço Médio
+    preco_medio_ext = valor_ext / litros_ext if litros_ext > 0 else 0
+    preco_medio_int = valor_int / litros_int if litros_int > 0 else 0
+
 
     total_litros = litros_ext + litros_int
     perc_ext = (litros_ext / total_litros * 100) if total_litros > 0 else 0
@@ -222,12 +227,14 @@ def main():
 
     with tab1:
         st.markdown(f"### 📆 Período Selecionado: "
-                    f"`{start_date_filter.strftime('%d/%m/%Y')} a {end_date_filter.strftime('%d/%m/%Y')}`")
-        c1, c2, c3, c4 = st.columns(4)
+                            f"`{start_date_filter.strftime('%d/%m/%Y')} a {end_date_filter.strftime('%d/%m/%Y')}`")
+        c1, c2, c3, c4, c5, c6 = st.columns(6) # Aumentar o número de colunas para incluir os preços médios
         c1.metric('⛽ Litros (Externo)', f'{litros_ext:,.2f} L', delta=f'{perc_ext:.1f} %')
         c2.metric('💸 Custo (Externo)', f'R$ {valor_ext:,.2f}')
-        c3.metric('⛽ Litros (Interno)', f'{litros_int:,.2f} L', delta=f'{perc_int:.1f} %')
-        c4.metric('💸 Custo (Interno)', f'R$ {valor_int:,.2f}')
+        c3.metric('💲 Preço Médio (Externo)', f'R$ {preco_medio_ext:,.2f}/L') # Novo KPI
+        c4.metric('⛽ Litros (Interno)', f'{litros_int:,.2f} L', delta=f'{perc_int:.1f} %')
+        c5.metric('💸 Custo (Interno)', f'R$ {valor_int:,.2f}')
+        c6.metric('💲 Preço Médio (Interno)', f'R$ {preco_medio_int:,.2f}/L') # Novo KPI
 
         df_kpi = pd.DataFrame({
             'Métrica': ['Litros', 'Custo'],
@@ -312,6 +319,10 @@ def main():
             df_preco_medio_int['PRECO_MEDIO'] = df_preco_medio_int.apply(
                 lambda row: row['VALOR'] / row['QTDE_LITROS'] if row['QTDE_LITROS'] > 0 else 0, axis=1)
 
+        # Preço Médio Externo por Data para o gráfico
+        df_ext_agg['PRECO_MEDIO'] = df_ext_agg.apply(
+            lambda row: row['CUSTO TOTAL'] / row['LITROS'] if row['LITROS'] > 0 else 0, axis=1)
+
         fig_ext_litros = px.line(df_ext_agg, x='DATA', y='LITROS', markers=True,
                                  title='Litros Consumidos (Externo)', labels={'LITROS':'Litros', 'DATA':'Data'})
         st.plotly_chart(fig_ext_litros, use_container_width=True)
@@ -319,6 +330,15 @@ def main():
         fig_ext_custo = px.line(df_ext_agg, x='DATA', y='CUSTO TOTAL', markers=True,
                                  title='Custo Total (Externo)', labels={'CUSTO TOTAL':'R$', 'DATA':'Data'})
         st.plotly_chart(fig_ext_custo, use_container_width=True)
+
+        # Novo gráfico para Preço Médio Externo
+        if not df_ext_agg.empty:
+            fig_preco_medio_ext = px.line(df_ext_agg, x='DATA', y='PRECO_MEDIO', markers=True,
+                                          title='Preço Médio do Combustível (Externo) [R$/Litro]',
+                                          labels={'PRECO_MEDIO':'R$/Litro', 'DATA':'Data'})
+            st.plotly_chart(fig_preco_medio_ext, use_container_width=True)
+        else:
+            st.info("Não há dados de custo e litros externos para calcular o preço médio neste período.")
 
         fig_int_litros = px.line(df_int_agg, x='DATA', y='QTDE_LITROS', markers=True,
                                  title='Litros Consumidos (Interno)', labels={'QTDE_LITROS':'Litros', 'DATA':'Data'})
@@ -330,8 +350,8 @@ def main():
 
         if not df_preco_medio_int.empty:
             fig_preco_medio = px.line(df_preco_medio_int, x='DATA', y='PRECO_MEDIO', markers=True,
-                                     title='Preço Médio do Combustível (Interno) [R$/Litro]',
-                                     labels={'PRECO_MEDIO':'R$/Litro', 'DATA':'Data'})
+                                       title='Preço Médio do Combustível (Interno) [R$/Litro]',
+                                       labels={'PRECO_MEDIO':'R$/Litro', 'DATA':'Data'})
             st.plotly_chart(fig_preco_medio, use_container_width=True)
         else:
             st.info("Não há dados de custo e litros internos para calcular o preço médio neste período.")
