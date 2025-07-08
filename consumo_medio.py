@@ -76,9 +76,17 @@ def main():
     if 'EMISSÃO' not in df_val.columns or 'VALOR' not in df_val.columns:
         st.error("A base de valores deve conter as colunas 'EMISSÃO' e 'VALOR'.")
         return
+    
+    # Adicionar verificação para a coluna 'ENTRADA'
+    if 'ENTRADA' not in df_val.columns:
+        st.error("A base de valores deve conter a coluna 'ENTRADA' para o cálculo do preço médio interno.")
+        return
 
     df_val['DATA'] = pd.to_datetime(df_val['EMISSÃO'], dayfirst=True, errors='coerce')
     df_val['VALOR'] = df_val['VALOR'].apply(tratar_valor)
+    # Certificar que 'ENTRADA' é numérica e tratar valores nulos
+    df_val['ENTRADA'] = pd.to_numeric(df_val['ENTRADA'], errors='coerce').fillna(0.0)
+
 
     df_ext.dropna(subset=['DATA'], inplace=True)
     df_int.dropna(subset=['DATA'], inplace=True)
@@ -191,9 +199,6 @@ def main():
     if filtro_placa != 'Todas':
         df_ext = df_ext[df_ext['PLACA'] == filtro_placa]
         df_int = df_int[df_int['PLACA'] == filtro_placa]
-        # Removido: A base df_val (valores de combustível) geralmente não é filtrada por placa,
-        # pois contém os preços de compra gerais por data, não por veículo específico.
-        # Se df_val PRECISA ser filtrada por placa, por favor, me informe como as placas se relacionam.
     # --- FIM DAS ALTERAÇÕES PARA FILTRO DE PLACA E DUPLICATAS ---
 
 
@@ -206,7 +211,9 @@ def main():
 
     litros_ext = df_ext['LITROS'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
-    litros_int = df_int['QUANTIDADE DE LITROS'].sum()
+    
+    # ALTERAÇÃO AQUI: Use 'ENTRADA' da df_val para litros internos totais
+    litros_int = df_val['ENTRADA'].sum() 
     valor_int = df_val['VALOR'].sum()
 
     # Cálculo do Preço Médio
@@ -228,13 +235,13 @@ def main():
     with tab1:
         st.markdown(f"### 📆 Período Selecionado: "
                             f"`{start_date_filter.strftime('%d/%m/%Y')} a {end_date_filter.strftime('%d/%m/%Y')}`")
-        c1, c2, c3, c4, c5, c6 = st.columns(6) # Aumentar o número de colunas para incluir os preços médios
+        c1, c2, c3, c4, c5, c6 = st.columns(6) 
         c1.metric('⛽ Litros (Externo)', f'{litros_ext:,.2f} L', delta=f'{perc_ext:.1f} %')
         c2.metric('💸 Custo (Externo)', f'R$ {valor_ext:,.2f}')
-        c3.metric('💲 Preço Médio (Externo)', f'R$ {preco_medio_ext:,.2f}/L') # Novo KPI
+        c3.metric('💲 Preço Médio (Externo)', f'R$ {preco_medio_ext:,.2f}/L') 
         c4.metric('⛽ Litros (Interno)', f'{litros_int:,.2f} L', delta=f'{perc_int:.1f} %')
         c5.metric('💸 Custo (Interno)', f'R$ {valor_int:,.2f}')
-        c6.metric('💲 Preço Médio (Interno)', f'R$ {preco_medio_int:,.2f}/L') # Novo KPI
+        c6.metric('💲 Preço Médio (Interno)', f'R$ {preco_medio_int:,.2f}/L') 
 
         df_kpi = pd.DataFrame({
             'Métrica': ['Litros', 'Custo'],
@@ -309,12 +316,14 @@ def main():
         st.markdown("### 📈 Tendência de Consumo, Custo e Preço Médio ao longo do Tempo")
 
         df_ext_agg = df_ext.groupby('DATA').agg({'LITROS':'sum', 'CUSTO TOTAL':'sum'}).reset_index()
-        df_int_agg = df_int.groupby('DATA').agg({'QUANTIDADE DE LITROS':'sum'}).reset_index()
+        # Alteração: Use 'ENTRADA' para litros internos agrupados por data
+        df_int_agg_litros = df_val.groupby('DATA').agg({'ENTRADA':'sum'}).reset_index() 
         df_val_agg = df_val.groupby('DATA').agg({'VALOR':'sum'}).reset_index()
 
-        df_int_agg = df_int_agg.rename(columns={'QUANTIDADE DE LITROS': 'QTDE_LITROS'})
+        df_int_agg_litros = df_int_agg_litros.rename(columns={'ENTRADA': 'QTDE_LITROS'})
 
-        df_preco_medio_int = pd.merge(df_val_agg, df_int_agg, on='DATA', how='inner')
+        # Merge de df_val_agg e df_int_agg_litros para o cálculo do preço médio interno temporal
+        df_preco_medio_int = pd.merge(df_val_agg, df_int_agg_litros, on='DATA', how='inner')
         if not df_preco_medio_int.empty:
             df_preco_medio_int['PRECO_MEDIO'] = df_preco_medio_int.apply(
                 lambda row: row['VALOR'] / row['QTDE_LITROS'] if row['QTDE_LITROS'] > 0 else 0, axis=1)
@@ -331,7 +340,7 @@ def main():
                                  title='Custo Total (Externo)', labels={'CUSTO TOTAL':'R$', 'DATA':'Data'})
         st.plotly_chart(fig_ext_custo, use_container_width=True)
 
-        # Novo gráfico para Preço Médio Externo
+        # Gráfico para Preço Médio Externo
         if not df_ext_agg.empty:
             fig_preco_medio_ext = px.line(df_ext_agg, x='DATA', y='PRECO_MEDIO', markers=True,
                                           title='Preço Médio do Combustível (Externo) [R$/Litro]',
@@ -340,21 +349,26 @@ def main():
         else:
             st.info("Não há dados de custo e litros externos para calcular o preço médio neste período.")
 
-        fig_int_litros = px.line(df_int_agg, x='DATA', y='QTDE_LITROS', markers=True,
-                                 title='Litros Consumidos (Interno)', labels={'QTDE_LITROS':'Litros', 'DATA':'Data'})
+        # Gráfico de litros consumidos internos (ainda usando df_int_agg, pois se refere ao consumo nos veículos)
+        # Se você quiser mostrar a entrada na bomba por data, usaria df_int_agg_litros aqui
+        fig_int_litros = px.line(df_int.groupby('DATA').agg({'QUANTIDADE DE LITROS':'sum'}).reset_index(), # Mantém o consumo dos veículos aqui
+                                 x='DATA', y='QUANTIDADE DE LITROS', markers=True,
+                                 title='Litros Abastecidos (Interno - Veículos)', labels={'QUANTIDADE DE LITROS':'Litros', 'DATA':'Data'})
         st.plotly_chart(fig_int_litros, use_container_width=True)
+
 
         fig_int_custo = px.line(df_val_agg, x='DATA', y='VALOR', markers=True,
                                  title='Custo Total (Interno)', labels={'VALOR':'R$', 'DATA':'Data'})
         st.plotly_chart(fig_int_custo, use_container_width=True)
 
+        # Gráfico do Preço Médio Interno (agora baseado em 'ENTRADA')
         if not df_preco_medio_int.empty:
             fig_preco_medio = px.line(df_preco_medio_int, x='DATA', y='PRECO_MEDIO', markers=True,
-                                       title='Preço Médio do Combustível (Interno) [R$/Litro]',
+                                       title='Preço Médio do Combustível (Interno - Entrada na Bomba) [R$/Litro]',
                                        labels={'PRECO_MEDIO':'R$/Litro', 'DATA':'Data'})
             st.plotly_chart(fig_preco_medio, use_container_width=True)
         else:
-            st.info("Não há dados de custo e litros internos para calcular o preço médio neste período.")
+            st.info("Não há dados de custo e litros de entrada na bomba para calcular o preço médio interno neste período.")
 
 if __name__ == '__main__':
     main()
