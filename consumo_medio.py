@@ -112,22 +112,18 @@ def main():
         litros_ext = df_ext['LITROS'].sum()
         valor_ext = df_ext['CUSTO TOTAL'].sum()
         litros_int = df_int['QUANTIDADE DE LITROS'].sum()
-
-        # Calcular custo interno com base na média ponderada
-        total_valor_int = df_val['VALOR'].sum()
-        valor_int = total_valor_int
-        preco_medio_ponderado = total_valor_int / litros_int if litros_int > 0 else 0
-
+        valor_int = df_val['VALOR'].sum()
         total_litros = litros_ext + litros_int
         perc_ext = (litros_ext / total_litros * 100) if total_litros else 0
         perc_int = (litros_int / total_litros * 100) if total_litros else 0
 
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric('Litros Externo', f'{litros_ext:,.2f} L', delta=f'{perc_ext:.1f}%')
         c2.metric('Custo Externo', f'R$ {valor_ext:,.2f}')
         c3.metric('Litros Interno', f'{litros_int:,.2f} L', delta=f'{perc_int:.1f}%')
         c4.metric('Custo Interno', f'R$ {valor_int:,.2f}')
-        c5.metric('💰 Preço Médio Interno', f'R$ {preco_medio_ponderado:.2f}')
+
+    # Demais tabs continuam aqui (sem alteração)
 
 if __name__ == '__main__':
     main()
