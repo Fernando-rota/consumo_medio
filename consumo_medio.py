@@ -69,10 +69,10 @@ def main():
     # Upload de arquivos
     with st.expander('📁 Carregar bases de dados (Clique para instruções)'):
         st.markdown("""
-        **📝 Formato esperado:**  
-        - **Base Externa**: Deve conter colunas: DATA, PLACA, LITROS, CUSTO TOTAL  
-        - **Base Interna**: Deve conter colunas: DATA, PLACA, QUANTIDADE DE LITROS  
-        - **Base Valores**: Deve conter colunas: EMISSÃO, VALOR  
+        **📝 Formato obrigatório:**  
+        - **Base Externa**: DATA, PLACA, CONSUMO, CUSTO TOTAL, KM ATUAL  
+        - **Base Interna**: DATA, PLACA, QUANTIDADE DE LITROS, KM ATUAL  
+        - **Base Valores**: EMISSÃO, VALOR  
         """)
         
         c1, c2, c3 = st.columns(3)
@@ -94,32 +94,34 @@ def main():
 
     # Verificação de colunas obrigatórias
     colunas_obrigatorias = {
-        'Base Externa': ['DATA', 'PLACA', 'LITROS', 'CUSTO TOTAL'],
-        'Base Interna': ['DATA', 'PLACA', 'QUANTIDADE DE LITROS'],
+        'Base Externa': ['DATA', 'PLACA', 'CONSUMO', 'CUSTO TOTAL', 'KM ATUAL'],
+        'Base Interna': ['DATA', 'PLACA', 'QUANTIDADE DE LITROS', 'KM ATUAL'],
         'Base Combustível': ['EMISSÃO', 'VALOR']
     }
     
     for df, nome in zip([df_ext, df_int, df_val], colunas_obrigatorias.keys()):
         colunas_faltantes = [col for col in colunas_obrigatorias[nome] if col not in df.columns]
         if colunas_faltantes:
-            st.error(f"Colunas obrigatórias faltantes em {nome}: {', '.join(colunas_faltantes)}")
+            st.error(f"Coluna(s) obrigatória(s) faltante(s) em {nome}: {', '.join(colunas_faltantes)}")
             return
 
     # Pré-processamento dos dados
     def preprocessar_dados(df_ext, df_int, df_val):
         # Converter tipos de dados
         df_ext['DATA'] = pd.to_datetime(df_ext['DATA'], dayfirst=True, errors='coerce')
-        df_ext['LITROS'] = pd.to_numeric(df_ext['LITROS'].str.replace(',', '.'), errors='coerce').fillna(0)
+        df_ext['CONSUMO'] = pd.to_numeric(df_ext['CONSUMO'].str.replace(',', '.'), errors='coerce').fillna(0)
         df_ext['CUSTO TOTAL'] = pd.to_numeric(
             df_ext['CUSTO TOTAL'].astype(str).str.replace('R$', '').str.replace('.', '').str.replace(',', '.'), 
             errors='coerce'
         ).fillna(0)
+        df_ext['KM ATUAL'] = pd.to_numeric(df_ext['KM ATUAL'], errors='coerce').fillna(0)
         
         df_int['DATA'] = pd.to_datetime(df_int['DATA'], dayfirst=True, errors='coerce')
         df_int['QUANTIDADE DE LITROS'] = pd.to_numeric(
             df_int['QUANTIDADE DE LITROS'].str.replace(',', '.'), 
             errors='coerce'
         ).fillna(0)
+        df_int['KM ATUAL'] = pd.to_numeric(df_int['KM ATUAL'], errors='coerce').fillna(0)
         
         df_val['DATA'] = pd.to_datetime(df_val['EMISSÃO'], dayfirst=True, errors='coerce')
         df_val['VALOR'] = pd.to_numeric(
@@ -161,17 +163,6 @@ def main():
     df_val = df_val[(df_val['DATA'].dt.date >= data_selecao[0]) & 
                     (df_val['DATA'].dt.date <= data_selecao[1])]
 
-    # Filtro por tipo de combustível (se existir)
-    combustivel_col = next((col for col in df_ext.columns if 'COMBUST' in col or 'DESCRI' in col), None)
-    if combustivel_col:
-        tipos_combustivel = sorted(df_ext[combustivel_col].dropna().unique())
-        filtro_combustivel = st.sidebar.selectbox(
-            '🛢️ Tipo de combustível:', 
-            ['Todos'] + tipos_combustivel
-        )
-        if filtro_combustivel != 'Todos':
-            df_ext = df_ext[df_ext[combustivel_col] == filtro_combustivel]
-
     # Filtro por placa
     placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique())
     filtro_placa = st.sidebar.selectbox('🚗 Placa do veículo:', ['Todas'] + placas)
@@ -183,7 +174,7 @@ def main():
             df_val = df_val[df_val['PLACA'] == filtro_placa]
 
     # Cálculo de métricas principais
-    litros_ext = df_ext['LITROS'].sum()
+    litros_ext = df_ext['CONSUMO'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
     litros_int = df_int['QUANTIDADE DE LITROS'].sum()
     valor_int = df_val['VALOR'].sum()
@@ -248,9 +239,9 @@ def main():
         
         # Top 10 externo
         top_ext = df_ext.groupby('PLACA').agg({
-            'LITROS': 'sum',
+            'CONSUMO': 'sum',
             'CUSTO TOTAL': 'sum'
-        }).nlargest(10, 'LITROS').reset_index()
+        }).nlargest(10, 'CONSUMO').reset_index()
         
         # Top 10 interno
         top_int = df_int.groupby('PLACA').agg({
@@ -263,10 +254,10 @@ def main():
         with col1:
             st.markdown("#### 🏪 Abastecimento Externo")
             fig1 = px.bar(
-                top_ext, y='PLACA', x='LITROS', orientation='h',
-                color='LITROS', color_continuous_scale='Blues',
-                labels={'LITROS': 'Litros consumidos', 'PLACA': 'Placa'},
-                text=[f"{x:,.1f} L" for x in top_ext['LITROS']]
+                top_ext, y='PLACA', x='CONSUMO', orientation='h',
+                color='CONSUMO', color_continuous_scale='Blues',
+                labels={'CONSUMO': 'Litros consumidos', 'PLACA': 'Placa'},
+                text=[f"{x:,.1f} L" for x in top_ext['CONSUMO']]
             )
             fig1.update_layout(yaxis={'categoryorder': 'total ascending'})
             st.plotly_chart(fig1, use_container_width=True)
@@ -287,8 +278,8 @@ def main():
         
         # Cálculo do consumo médio
         df_consumo = pd.concat([
-            df_ext[['PLACA', 'DATA', 'KM ATUAL', 'LITROS']].rename(
-                columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'LITROS': 'litros'}),
+            df_ext[['PLACA', 'DATA', 'KM ATUAL', 'CONSUMO']].rename(
+                columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'CONSUMO': 'litros'}),
             df_int[['PLACA', 'DATA', 'KM ATUAL', 'QUANTIDADE DE LITROS']].rename(
                 columns={'PLACA': 'placa', 'DATA': 'data', 'KM ATUAL': 'km_atual', 'QUANTIDADE DE LITROS': 'litros'})
         ])
@@ -337,7 +328,7 @@ def main():
         
         # Agregação por data
         df_ext_agg = df_ext.groupby('DATA').agg({
-            'LITROS': 'sum',
+            'CONSUMO': 'sum',
             'CUSTO TOTAL': 'sum'
         }).reset_index()
         
