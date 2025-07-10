@@ -29,7 +29,7 @@ if uploaded_comb and uploaded_ext and uploaded_int:
     df_ext = padroniza_colunas(pd.read_csv(uploaded_ext, sep=";", encoding="utf-8"))
     df_int = padroniza_colunas(pd.read_csv(uploaded_int, sep=";", encoding="utf-8"))
 
-    colunas_necessarias_ext = {"PLACA", "CONSUMO", "VALOR PAGO", "DATA", "DESCRIÇÃO DO ABASTECIMENTO"}
+    colunas_necessarias_ext = {"PLACA", "CONSUMO", "CUSTO TOTAL", "DATA", "DESCRIÇÃO DO ABASTECIMENTO"}
     colunas_necessarias_int = {"PLACA", "QUANTIDADE DE LITROS", "DATA", "TIPO"}
 
     faltando_ext = colunas_necessarias_ext - set(df_ext.columns)
@@ -64,7 +64,7 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         df_int_filt = aplicar_filtros(df_int, "PLACA")
 
         consumo_ext = df_ext_filt["CONSUMO"].apply(para_float).sum()
-        custo_ext = df_ext_filt["VALOR PAGO"].apply(para_float).sum()
+        custo_ext = df_ext_filt["CUSTO TOTAL"].apply(para_float).sum()
         consumo_int = df_int_filt[df_int_filt["TIPO"] == "SAÍDA DE DIESEL"]["QUANTIDADE DE LITROS"].apply(para_float).sum()
 
         # CALCULAR MÉDIA DE VALOR POR LITRO INTERNO (ENTRADAS)
@@ -72,9 +72,9 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         entradas["QUANTIDADE DE LITROS"] = entradas["QUANTIDADE DE LITROS"].apply(para_float)
         entradas = entradas.merge(df_comb, left_on="DATA", right_on="EMISSAO", how="left")
 
-        if "VALOR PAGO" in df_comb.columns:
-            entradas["VALOR PAGO"] = entradas["VALOR PAGO"].apply(para_float)
-            valor_total_entrada = entradas["VALOR PAGO"].sum()
+        if "CUSTO TOTAL" in df_comb.columns:
+            entradas["CUSTO TOTAL"] = entradas["CUSTO TOTAL"].apply(para_float)
+            valor_total_entrada = entradas["CUSTO TOTAL"].sum()
             litros_entrada = entradas["QUANTIDADE DE LITROS"].sum()
             preco_medio_litro = valor_total_entrada / litros_entrada if litros_entrada else 0
         else:
@@ -91,7 +91,7 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         df_ext_copy["DATA"] = pd.to_datetime(df_ext_copy["DATA"], dayfirst=True, errors="coerce")
         df_ext_copy["FONTE"] = "Externo"
         df_ext_copy["LITROS"] = df_ext_copy["CONSUMO"].apply(para_float)
-        df_ext_copy["CUSTO"] = df_ext_copy["VALOR PAGO"].apply(para_float)
+        df_ext_copy["CUSTO"] = df_ext_copy["CUSTO TOTAL"].apply(para_float)
         df_ext_copy["KM RODADOS"] = df_ext_copy.get("KM RODADOS", None).apply(para_float) if "KM RODADOS" in df_ext_copy else None
         df_ext_copy["KM/LITRO"] = df_ext_copy.get("KM/LITRO", None).apply(para_float) if "KM/LITRO" in df_ext_copy else None
 
