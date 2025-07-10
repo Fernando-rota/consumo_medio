@@ -27,37 +27,45 @@ def para_float(valor):
 def load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int):
     """
     Loads, preprocesses, and validates the uploaded CSV files.
+
+    Args:
+        uploaded_comb: Uploaded file object for financial data.
+        uploaded_ext: Uploaded file object for external fueling data.
+        uploaded_int: Uploaded file object for internal fueling data.
+
+    Returns:
+        tuple: (df_comb, df_ext, df_int, placas_validas, combustiveis) or (None, None, None, None, None) if errors occur.
     """
     df_comb, df_ext, df_int = None, None, None
     errors = []
 
+    # Using comma as separator based on user confirmation
+    csv_separator = ","
+
     # --- Load DataFrames with error handling ---
     try:
-        # ATENÇÃO AQUI: Mude sep=";" para sep=","
-        df_comb = padroniza_colunas(pd.read_csv(uploaded_comb, sep=",", encoding="utf-8"))
+        df_comb = padroniza_colunas(pd.read_csv(uploaded_comb, sep=csv_separator, encoding="utf-8"))
     except Exception as e:
         errors.append(f"Erro ao carregar arquivo 'Combustível (Financeiro)': {e}")
 
     try:
-        # ATENÇÃO AQUI: Mude sep=";" para sep=","
-        df_ext = padroniza_colunas(pd.read_csv(uploaded_ext, sep=",", encoding="utf-8"))
+        df_ext = padroniza_colunas(pd.read_csv(uploaded_ext, sep=csv_separator, encoding="utf-8"))
     except Exception as e:
         errors.append(f"Erro ao carregar arquivo 'Abastecimento Externo': {e}")
 
     try:
-        # ATENÇÃO AQUI: Mude sep=";" para sep=","
-        df_int = padroniza_colunas(pd.read_csv(uploaded_int, sep=",", encoding="utf-8"))
+        df_int = padroniza_colunas(pd.read_csv(uploaded_int, sep=csv_separator, encoding="utf-8"))
     except Exception as e:
         errors.append(f"Erro ao carregar arquivo 'Abastecimento Interno': {e}")
 
     if errors:
         for error in errors:
             st.error(f"❌ {error}")
-        return None, None, None, None, None
+        return None, None, None, None, None # Return None for all if any file fails to load
 
-    # --- Validate Required Columns ---
+    # --- Validate Required Columns (UPDATED for 'DATA HORA' in internal sheet) ---
     required_cols_ext = {"PLACA", "CONSUMO", "CUSTO TOTAL", "DATA"}
-    required_cols_int = {"PLACA", "QUANTIDADE DE LITROS", "DATA"}
+    required_cols_int = {"PLACA", "QUANTIDADE DE LITROS", "DATA HORA"} # Expect 'DATA HORA' in internal CSV
 
     missing_ext = required_cols_ext - set(df_ext.columns)
     missing_int = required_cols_int - set(df_int.columns)
@@ -73,21 +81,32 @@ def load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int):
     df_ext["PLACA"] = df_ext["PLACA"].astype(str).str.upper().str.strip().str.replace(" ", "")
     df_int["PLACA"] = df_int["PLACA"].astype(str).str.upper().str.strip().str.replace(" ", "")
 
+    # Convert 'DATA' columns to datetime, coercing errors to NaT (Not a Time)
     df_ext["DATA"] = pd.to_datetime(df_ext["DATA"], dayfirst=True, errors="coerce")
+
+    # Rename 'DATA HORA' to 'DATA' in df_int for consistency, then convert to datetime
+    if 'DATA HORA' in df_int.columns:
+        df_int.rename(columns={'DATA HORA': 'DATA'}, inplace=True)
     df_int["DATA"] = pd.to_datetime(df_int["DATA"], dayfirst=True, errors="coerce")
 
+
+    # Apply para_float to numerical columns, including optional ones using .get()
     df_ext["CONSUMO"] = df_ext["CONSUMO"].apply(para_float)
     df_ext["CUSTO TOTAL"] = df_ext["CUSTO TOTAL"].apply(para_float)
+    # Using .get() with a default Series ensures the column exists even if missing in original CSV
     df_ext["KM RODADOS"] = df_ext.get("KM RODADOS", pd.Series([None]*len(df_ext))).apply(para_float)
     df_ext["KM/LITRO"] = df_ext.get("KM/LITRO", pd.Series([None]*len(df_ext))).apply(para_float)
 
     df_int["QUANTIDADE DE LITROS"] = df_int["QUANTIDADE DE LITROS"].apply(para_float)
 
+    # Clean financial data dates
     if "PAGAMENTO" in df_comb.columns:
         df_comb["PAGAMENTO"] = pd.to_datetime(df_comb["PAGAMENTO"], dayfirst=True, errors="coerce")
     if "VENCIMENTO" in df_comb.columns:
         df_comb["VENCIMENTO"] = pd.to_datetime(df_comb["VENCIMENTO"], dayfirst=True, errors="coerce")
 
+    # Determine unique valid plates and fuel types for filters
+    # Filter out common invalid/placeholder plate values
     placas_validas = sorted(set(df_ext["PLACA"]).union(df_int["PLACA"]) - {"-", "CORREÇÃO", "NAN", "", "NONE"})
     combustiveis = []
     if "DESCRIÇÃO DO ABASTECIMENTO" in df_ext.columns:
@@ -99,13 +118,27 @@ def load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int):
 def calculate_kpis_and_combine_data(df_ext_filtered, df_int_filtered):
     """
     Calculates key performance indicators and combines external and internal fueling data.
+
+    Args:
+        df_ext_filtered (pd.DataFrame): Filtered external fueling data.
+        df_int_filtered (pd.DataFrame): Filtered internal fueling data.
+
+    Returns:
+        tuple: (consumo_ext, custo_ext, consumo_int, custo_int_estimated, df_all, df_efficiency, avg_price_per_liter_ext)
     """
+    # Calculate external consumption and cost
     consumo_ext = df_ext_filtered["CONSUMO"].sum()
     custo_ext = df_ext_filtered["CUSTO TOTAL"].sum()
+
+    # Calculate internal consumption
     consumo_int = df_int_filtered["QUANTIDADE DE LITROS"].sum()
 
+    # --- Internal Fueling Cost (Estimated) ---
+    # Estimate internal cost based on the average price per liter from external fueling.
+    # This assumes external prices are a reasonable proxy for internal fuel cost.
     avg_price_per_liter_ext = 0
     valid_ext_for_price = df_ext_filtered.dropna(subset=["CUSTO TOTAL", "CONSUMO"])
+    # Ensure no division by zero and there's actual consumption data
     if not valid_ext_for_price.empty and valid_ext_for_price["CONSUMO"].sum() > 0:
         avg_price_per_liter_ext = valid_ext_for_price["CUSTO TOTAL"].sum() / valid_ext_for_price["CONSUMO"].sum()
 
@@ -113,6 +146,7 @@ def calculate_kpis_and_combine_data(df_ext_filtered, df_int_filtered):
     if avg_price_per_liter_ext > 0 and consumo_int > 0:
         custo_int_estimated = consumo_int * avg_price_per_liter_ext
 
+    # --- Prepare DataFrames for Concatenation ---
     df_ext_processed = df_ext_filtered.copy()
     df_ext_processed["FONTE"] = "Externo"
     df_ext_processed["LITROS"] = df_ext_processed["CONSUMO"]
@@ -121,34 +155,42 @@ def calculate_kpis_and_combine_data(df_ext_filtered, df_int_filtered):
     df_int_processed = df_int_filtered.copy()
     df_int_processed["FONTE"] = "Interno"
     df_int_processed["LITROS"] = df_int_processed["QUANTIDADE DE LITROS"]
-    df_int_processed["CUSTO"] = df_int_processed["LITROS"] * custo_int_estimated # Corrigido para usar a variável calculada
+    # Assign estimated cost for internal fueling based on calculated average price
+    df_int_processed["CUSTO"] = df_int_processed["LITROS"] * avg_price_per_liter_ext
 
+    # Define common columns to ensure consistent structure before concatenation
+    # Add KM RODADOS and KM/LITRO if they exist in the external data
     common_cols = ["DATA", "PLACA", "LITROS", "CUSTO", "FONTE"]
     if "KM RODADOS" in df_ext_processed.columns:
         common_cols.append("KM RODADOS")
     if "KM/LITRO" in df_ext_processed.columns:
         common_cols.append("KM/LITRO")
 
+    # Ensure all common columns are present in both DFs before concat, fill with None if not
     for col in common_cols:
         if col not in df_ext_processed.columns:
             df_ext_processed[col] = pd.Series([None] * len(df_ext_processed))
         if col not in df_int_processed.columns:
             df_int_processed[col] = pd.Series([None] * len(df_int_processed))
 
+    # Concatenate data for combined analysis
     df_all = pd.concat([
         df_ext_processed[common_cols],
         df_int_processed[common_cols]
     ], ignore_index=True)
 
+    # Calculate KM/L for external fueling.
+    # Assuming 'KM RODADOS' is the actual distance driven since the last fill-up.
     df_efficiency = df_ext_processed.dropna(subset=["KM RODADOS", "LITROS"]).copy()
     if not df_efficiency.empty:
+        # Avoid division by zero for KM/L calculation
         df_efficiency = df_efficiency[df_efficiency["LITROS"] > 0]
         if not df_efficiency.empty:
             df_efficiency["KM/LITRO CALC"] = df_efficiency["KM RODADOS"] / df_efficiency["LITROS"]
         else:
-            df_efficiency["KM/LITRO CALC"] = None
+            df_efficiency["KM/LITRO CALC"] = None # No valid data after filtering zero liters
     else:
-        df_efficiency["KM/LITRO CALC"] = None
+        df_efficiency["KM/LITRO CALC"] = None # Ensure column exists even if empty
 
     return consumo_ext, custo_ext, consumo_int, custo_int_estimated, df_all, df_efficiency, avg_price_per_liter_ext
 
@@ -160,20 +202,28 @@ uploaded_int = st.sidebar.file_uploader("🛢️ Abastecimento Interno", type="c
 
 # --- Main Dashboard Logic ---
 if uploaded_comb and uploaded_ext and uploaded_int:
+    # Attempt to load and preprocess data
     df_comb, df_ext, df_int, placas_validas, combustiveis = load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int)
 
+    # Proceed only if all files were loaded and validated successfully (df_comb is not None)
     if df_comb is not None:
         st.sidebar.markdown("---")
         st.sidebar.header("⚙️ Filtros")
 
+        # Placa and Fuel Type Filters
         col1_filter, col2_filter = st.columns(2)
         with col1_filter:
             placa_selecionada = st.selectbox("🔎 Filtrar por Placa", ["Todas"] + placas_validas)
         with col2_filter:
+            # Note: Fuel type filter primarily applies to external fueling data as internal data often lacks this detail
             tipo_comb = st.selectbox("⛽ Tipo de Combustível (Apenas Externo)", ["Todos"] + combustiveis)
 
+        # Date Range Filter (applies to both external and internal fueling data)
         st.sidebar.subheader("📅 Filtrar por Período")
 
+        # Determine the overall min/max dates from the initially loaded (raw) dataframes
+        # This ensures the date picker always shows the full range available in the dataset,
+        # even if specific filters (like plate) result in an empty subset.
         all_dates_series = pd.Series(dtype='datetime64[ns]')
         if df_ext is not None and 'DATA' in df_ext.columns:
             all_dates_series = pd.concat([all_dates_series, df_ext['DATA'].dropna()])
@@ -188,7 +238,7 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         if global_min_date and global_max_date:
             date_range_selection = st.sidebar.date_input(
                 "Selecione o intervalo de datas",
-                value=(global_min_date, global_max_date),
+                value=(global_min_date, global_max_date), # Default to the full date range
                 min_value=global_min_date,
                 max_value=global_max_date
             )
@@ -196,15 +246,19 @@ if uploaded_comb and uploaded_ext and uploaded_int:
                 start_date_filter, end_date_filter = date_range_selection
             elif len(date_range_selection) == 1:
                 st.sidebar.info("Selecione um intervalo de duas datas para aplicar o filtro.")
+                # If only one date is selected, don't apply date filter yet, use full range conceptually
                 start_date_filter, end_date_filter = global_min_date, global_max_date
         else:
             st.sidebar.info("Não há dados de data válidos para o filtro de período.")
+            # If no valid dates, set to full original dataframes conceptually
             start_date_filter, end_date_filter = None, None
 
+        # --- Apply Filters in Order: Date -> Placa -> Combustível ---
         df_ext_filtered_by_date = df_ext.copy()
         df_int_filtered_by_date = df_int.copy()
 
         if start_date_filter and end_date_filter:
+            # Filter by date, handling potential NaT values
             df_ext_filtered_by_date = df_ext_filtered_by_date[
                 (df_ext_filtered_by_date['DATA'].notna()) &
                 (df_ext_filtered_by_date["DATA"] >= pd.Timestamp(start_date_filter)) &
@@ -216,21 +270,27 @@ if uploaded_comb and uploaded_ext and uploaded_int:
                 (df_int_filtered_by_date["DATA"] <= pd.Timestamp(end_date_filter))
             ]
 
+
+        # Apply Placa filter
         df_ext_final_filtered = df_ext_filtered_by_date[df_ext_filtered_by_date["PLACA"] == placa_selecionada] if placa_selecionada != "Todas" else df_ext_filtered_by_date
         df_int_final_filtered = df_int_filtered_by_date[df_int_filtered_by_date["PLACA"] == placa_selecionada] if placa_selecionada != "Todas" else df_int_filtered_by_date
 
+        # Apply Tipo de Combustível filter (only for external data)
         if tipo_comb != "Todos" and "DESCRIÇÃO DO ABASTECIMENTO" in df_ext_final_filtered.columns:
             df_ext_final_filtered = df_ext_final_filtered[df_ext_final_filtered["DESCRIÇÃO DO ABASTECIMENTO"] == tipo_comb]
 
+        # Check if filtered data is empty before calculating KPIs and generating plots
         if df_ext_final_filtered.empty and df_int_final_filtered.empty:
             st.warning("Não há dados para os filtros selecionados. Por favor, ajuste as opções de filtro.")
         else:
+            # Calculate KPIs and prepare combined DataFrame
             consumo_ext, custo_ext, consumo_int, custo_int_estimated, df_all, df_efficiency, avg_price_per_liter_ext = \
                 calculate_kpis_and_combine_data(df_ext_final_filtered, df_int_final_filtered)
 
+            # --- Dashboard Tabs ---
             abas = st.tabs(["📊 Indicadores", "📈 Gráficos & Rankings", "🧾 Financeiro"])
 
-            with abas[0]:
+            with abas[0]: # Indicadores Tab
                 st.markdown("## 📊 Indicadores Resumidos")
                 col1_metric, col2_metric, col3_metric, col4_metric = st.columns(4)
 
@@ -244,7 +304,8 @@ if uploaded_comb and uploaded_ext and uploaded_int:
                 else:
                     st.warning("Não foi possível estimar o custo interno, pois não há dados de custo válidos para abastecimento externo.")
 
-            with abas[1]:
+
+            with abas[1]: # Gráficos & Rankings Tab
                 st.markdown("## 📈 Abastecimento por Placa")
                 if not df_all.empty and 'LITROS' in df_all.columns:
                     graf_placa = df_all.groupby("PLACA")["LITROS"].sum().reset_index().sort_values("LITROS", ascending=False)
@@ -257,6 +318,7 @@ if uploaded_comb and uploaded_ext and uploaded_int:
                 st.markdown("---")
                 st.markdown("## 📆 Tendência por Data")
                 if not df_all.empty and 'DATA' in df_all.columns and 'FONTE' in df_all.columns:
+                    # Drop rows where 'DATA' might be NaT after conversion/filtering for plotting
                     graf_tempo = df_all.dropna(subset=['DATA']).groupby(["DATA", "FONTE"])["LITROS"].sum().reset_index()
                     if not graf_tempo.empty:
                         fig_tempo = px.line(graf_tempo, x="DATA", y="LITROS", color="FONTE", markers=True,
@@ -303,15 +365,15 @@ if uploaded_comb and uploaded_ext and uploaded_int:
                 else:
                     st.info("Não há dados para exibir o Comparativo: Interno x Externo com os filtros selecionados.")
 
-            with abas[2]:
+            with abas[2]: # Financeiro Tab
                 st.markdown("## 🧾 Faturas de Combustível (Financeiro)")
                 if df_comb is not None and not df_comb.empty:
                     st.dataframe(df_comb, use_container_width=True, hide_index=True)
                 else:
                     st.info("Não há dados na planilha financeira ou o arquivo não foi carregado corretamente.")
 
-    else:
+    else: # This block executes if load_and_preprocess_data returned None due to an error
         st.error("Houve um problema ao carregar ou validar um dos arquivos. Por favor, verifique as mensagens de erro acima e tente novamente.")
 
-else:
+else: # This block executes if not all 3 files are uploaded
     st.warning("⬅️ Por favor, envie os 3 arquivos `.csv` na barra lateral esquerda para visualizar o dashboard completo.")
