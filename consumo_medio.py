@@ -77,7 +77,7 @@ def clean_numeric_column(series: pd.Series) -> pd.Series:
 
 def load_and_preprocess_dataframe(uploaded_file, file_type: str):
     """
-    Carrega um arquivo CSV, padroniza as colunas, renomeia e converte os tipos de dados.
+    Carrega um arquivo CSV ou XLSX, padroniza as colunas, renomeia e converte os tipos de dados.
     Args:
         uploaded_file: Objeto de arquivo enviado pelo Streamlit.
         file_type (str): Tipo de arquivo ('comb', 'ext', 'int') para renomeios e conversões específicas.
@@ -88,7 +88,14 @@ def load_and_preprocess_dataframe(uploaded_file, file_type: str):
         return None, f"Arquivo não enviado."
 
     try:
-        df = pd.read_csv(uploaded_file, sep=";", encoding="utf-8")
+        file_extension = uploaded_file.name.split('.')[-1].lower()
+        if file_extension == 'csv':
+            df = pd.read_csv(uploaded_file, sep=";", encoding="utf-8")
+        elif file_extension == 'xlsx':
+            df = pd.read_excel(uploaded_file)
+        else:
+            return None, f"Formato de arquivo não suportado: .{file_extension}. Por favor, use .csv ou .xlsx."
+
         if df.empty:
             return None, f"O arquivo '{uploaded_file.name}' está vazio."
 
@@ -125,7 +132,7 @@ def load_and_preprocess_dataframe(uploaded_file, file_type: str):
     except pd.errors.EmptyDataError:
         return None, f"O arquivo '{uploaded_file.name}' está vazio ou não contém dados."
     except Exception as e:
-        return None, f"Erro ao ler o arquivo '{uploaded_file.name}': {e}. Verifique o formato e o separador."
+        return None, f"Erro ao ler o arquivo '{uploaded_file.name}': {e}. Verifique o formato e o separador para CSVs, ou a estrutura para XLSX."
 
 def calcula_km_rodado_interno(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -242,9 +249,10 @@ if 'processed_data_ready' not in st.session_state:
 
 # --- Upload de Arquivos na Barra Lateral ---
 st.sidebar.header("Upload de Arquivos")
-uploaded_comb = st.sidebar.file_uploader("📄 Combustível (Financeiro)", type="csv", key="comb_file")
-uploaded_ext = st.sidebar.file_uploader("⛽ Abastecimento Externo", type="csv", key="ext_file")
-uploaded_int = st.sidebar.file_uploader("🛢️ Abastecimento Interno", type="csv", key="int_file")
+# Atualizado para aceitar .csv e .xlsx
+uploaded_comb = st.sidebar.file_uploader("📄 Combustível (Financeiro)", type=["csv", "xlsx"], key="comb_file")
+uploaded_ext = st.sidebar.file_uploader("⛽ Abastecimento Externo", type=["csv", "xlsx"], key="ext_file")
+uploaded_int = st.sidebar.file_uploader("🛢️ Abastecimento Interno", type=["csv", "xlsx"], key="int_file")
 
 st.sidebar.markdown("### ⚙️ Configuração Classificação de Eficiência (km/l)")
 limite_eficiente = st.sidebar.slider("Limite para 'Eficiente' (km/l)", 1.0, 10.0, 3.0, 0.1)
@@ -282,7 +290,8 @@ if st.session_state.processed_data_ready:
     df_int = st.session_state.df_int
 
     # Verificação de colunas obrigatórias após o pré-processamento
-    colunas_necessarias_ext = {"PLACA", "CONSUMO", "CUSTO TOTAL", "DATA", "DESCRICAO DO ABASTECIMENTO", "POSTO", "KM RODADOS"}
+    # Removido "KM RODADOS" de colunas_necessarias_ext pois pode ser calculado
+    colunas_necessarias_ext = {"PLACA", "CONSUMO", "CUSTO TOTAL", "DATA", "DESCRICAO DO ABASTECIMENTO", "POSTO"}
     colunas_necessarias_int = {"PLACA", "QUANTIDADE DE LITROS", "DATA", "TIPO", "KM ATUAL"}
     colunas_necessarias_comb = {"EMISSAO", "CUSTO TOTAL"} # PAGAMENTO é opcional para algumas análises
 
@@ -360,9 +369,36 @@ if st.session_state.processed_data_ready:
         df_ext_copy = df_ext_filt.copy()
         df_ext_copy["POSTO"] = df_ext_copy["POSTO"].fillna("Externo")
         df_ext_copy["LITROS"] = df_ext_copy["CONSUMO"] # 'CONSUMO' já é numérico do load_data
-        # Garante que 'KM RODADOS' exista no df_ext_copy
+        # Garante que 'KM RODADOS' exista no df_ext_copy, se não, tenta calcular ou deixa None
         if "KM RODADOS" not in df_ext_copy.columns:
-            df_ext_copy["KM RODADOS"] = None # Ou pode ser calculado se houver 'KM ATUAL'
+            # Se 'KM ATUAL' e 'DATA' estiverem presentes, pode-se tentar calcular KM RODADOS para o externo também
+            if "KM ATUAL" in df_ext_copy.columns and "DATA" in df_ext_copy.columns:
+                st.info("Tentando calcular 'KM RODADOS' para Abastecimento Externo, pois a coluna não foi encontrada.")
+                df_ext_copy_for_km = df_ext_copy.copy()
+                df_ext_copy_for_km["KM ATUAL"] = pd.to_numeric(df_ext_copy_for_km["KM ATUAL"], errors="coerce")
+                df_ext_copy_for_km["DATA"] = pd.to_datetime(df_ext_copy_for_km["DATA"], dayfirst=True, errors="coerce")
+                df_ext_copy_for_km.dropna(subset=["KM ATUAL", "DATA", "PLACA"], inplace=True)
+
+                if not df_ext_copy_for_km.empty:
+                    temp_res_list = []
+                    for placa, grupo_ext in df_ext_copy_for_km.sort_values(by="DATA").groupby("PLACA"):
+                        grupo_ext = grupo_ext.copy()
+                        grupo_ext["KM RODADOS"] = grupo_ext["KM ATUAL"].diff().fillna(0)
+                        grupo_ext.loc[grupo_ext["KM RODADOS"] < 0, "KM RODADOS"] = 0
+                        temp_res_list.append(grupo_ext)
+                    if temp_res_list:
+                        df_ext_copy = pd.concat(temp_res_list)
+                        st.success("Cálculo de 'KM RODADOS' para Abastecimento Externo concluído.")
+                    else:
+                        df_ext_copy["KM RODADOS"] = None
+                        st.warning("Não foi possível calcular 'KM RODADOS' para Abastecimento Externo.")
+                else:
+                    df_ext_copy["KM RODADOS"] = None
+                    st.warning("Dados insuficientes para calcular 'KM RODADOS' para Abastecimento Externo após limpeza.")
+            else:
+                df_ext_copy["KM RODADOS"] = None
+                st.warning("Colunas 'KM ATUAL' e/ou 'DATA' não encontradas no Abastecimento Externo para calcular 'KM RODADOS'.")
+
 
         # Unificar colunas para concatenação de df_ext_copy e saidas_com_km
         colunas_necessarias_all = ["DATA", "PLACA", "LITROS", "CUSTO TOTAL", "POSTO", "KM RODADOS"]
@@ -497,5 +533,5 @@ if st.session_state.processed_data_ready:
                 st.info("Arquivo Combustível não possui a coluna 'PAGAMENTO' ou está vazio para exibir detalhes financeiros. Verifique o arquivo.")
 
 else:
-    st.info("📥 Por favor, envie os três arquivos CSV nas opções da barra lateral e clique em 'Processar Arquivos' para iniciar a análise.")
+    st.info("📥 Por favor, envie os três arquivos CSV ou XLSX nas opções da barra lateral e clique em 'Processar Arquivos' para iniciar a análise.")
 
