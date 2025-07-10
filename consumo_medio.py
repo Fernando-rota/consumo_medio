@@ -71,9 +71,8 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         custo_ext = df_ext_filt["CUSTO TOTAL"].apply(para_float).sum()
         consumo_int = df_int_filt["QUANTIDADE DE LITROS"].apply(para_float).sum()
 
-        # Se tiver custo no abastecimento interno, somar também aqui (se não, será zero)
-        # Vou colocar como zero, pois seu dataset interno não tem coluna custo
-        custo_int = 0.0
+        # Para custo interno, como não tem coluna, deixo None para mostrar "N/A" ou zero
+        custo_int = None
 
         df_ext_copy = df_ext_filt.copy()
         df_ext_copy["FONTE"] = "Externo"
@@ -93,7 +92,7 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         df_int_copy["FONTE"] = "Interno"
         df_int_copy["DATA"] = pd.to_datetime(df_int_copy["DATA"], dayfirst=True, errors="coerce")
         df_int_copy["LITROS"] = df_int_copy["QUANTIDADE DE LITROS"].apply(para_float)
-        df_int_copy["CUSTO"] = custo_int  # zero aqui
+        df_int_copy["CUSTO"] = 0  # ou None, se preferir
         df_int_copy["KM RODADOS"] = None
         df_int_copy["KM/LITRO"] = None
 
@@ -102,23 +101,21 @@ if uploaded_comb and uploaded_ext and uploaded_int:
             df_int_copy[["DATA", "PLACA", "LITROS", "CUSTO", "FONTE", "KM RODADOS", "KM/LITRO"]]
         ], ignore_index=True)
 
-        # Criar abas
-        abas = st.tabs(["📊 Indicadores", "📄 Tabela Consolidada", "📈 Gráficos & Rankings", "🧾 Financeiro"])
+        abas = st.tabs(["📊 Indicadores", "📈 Gráficos & Rankings", "🧾 Financeiro"])
 
-        with abas[0]:  # Indicadores
+        with abas[0]:
             st.markdown("## 📊 Indicadores Resumidos")
             col1, col2, col3, col4 = st.columns(4)
 
             col1.metric("Total Externo (L)", f"{consumo_ext:.1f}")
             col2.metric("Total Interno (L)", f"{consumo_int:.1f}")
             col3.metric("Custo Total Externo", f"R$ {custo_ext:,.2f}")
-            col4.metric("Custo Total Interno", f"R$ {custo_int:,.2f}")
+            if custo_int is not None:
+                col4.metric("Custo Total Interno", f"R$ {custo_int:,.2f}")
+            else:
+                col4.markdown("**Custo Total Interno:** N/A")
 
-        with abas[1]:  # Tabela
-            st.markdown("## 📄 Tabela Consolidada")
-            st.dataframe(df_all.sort_values("DATA", ascending=False), use_container_width=True)
-
-        with abas[2]:  # Gráficos & Rankings
+        with abas[1]:
             st.markdown("## 📈 Abastecimento por Placa")
             graf_placa = df_all.groupby("PLACA")["LITROS"].sum().reset_index().sort_values("LITROS", ascending=False)
             fig = px.bar(graf_placa, x="PLACA", y="LITROS", color="PLACA", text_auto=True)
@@ -157,7 +154,7 @@ if uploaded_comb and uploaded_ext and uploaded_int:
                 fig4 = px.pie(comparativo, values="CUSTO", names="FONTE", title="Custo Total")
                 st.plotly_chart(fig4, use_container_width=True)
 
-        with abas[3]:  # Financeiro
+        with abas[2]:
             st.markdown("## 🧾 Faturas de Combustível (Financeiro)")
             if "PAGAMENTO" in df_comb.columns:
                 df_comb["PAGAMENTO"] = pd.to_datetime(df_comb["PAGAMENTO"], dayfirst=True, errors="coerce")
