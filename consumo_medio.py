@@ -18,7 +18,7 @@ limite_eficiente = st.sidebar.slider("Limite para 'Eficiente' (km/l)", min_value
 limite_normal = st.sidebar.slider("Limite para 'Normal' (km/l)", min_value=0.5, max_value=limite_eficiente, value=2.0, step=0.1)
 
 def padroniza_colunas(df):
-    df.columns = df.columns.str.strip().str.upper()
+    df.columns = df.columns.str.strip()
     return df
 
 def renomear_colunas(df, tipo):
@@ -28,22 +28,26 @@ def renomear_colunas(df, tipo):
         "TIPO": ["TIPO", "Tipo"],
         "QUANTIDADE DE LITROS": ["QUANTIDADE DE LITROS", "quantidade de litros", "Qtd Litros"],
         "CONSUMO": ["CONSUMO", "Consumo"],
-        "CUSTO TOTAL": ["CUSTO TOTAL", "VALOR PAGO", "valor total"],
+        "CUSTO TOTAL": ["CUSTO TOTAL", "VALOR PAGO", "valor pago", "valor total"],
         "DESCRIÇÃO DO ABASTECIMENTO": ["DESCRIÇÃO DO ABASTECIMENTO", "TIPO DE COMBUSTIVEL", "COMBUSTÍVEL"],
-        "KM ATUAL": ["KM ATUAL", "KM ATUAL", "KM_ATUAL"],
-        "KM RODADOS": ["KM RODADOS", "KM RODADOS", "KM_RODADOS"],
-        "EMISSAO": ["EMISSAO", "Emissão", "EMISSÃO"]
+        "KM ATUAL": ["KM ATUAL", "Km Atual", "KM_ATUAL"],
+        "KM RODADOS": ["KM RODADOS", "Km Rodados", "KM_RODADOS"],
+        "EMISSAO": ["EMISSAO", "Emissao", "Emissão", "EMISSÃO", "emissao"]
     }
 
     mapeamento = {}
+    cols_upper = [c.upper() for c in df.columns]
     for alvo, variações in renomeios_comuns.items():
         for v in variações:
-            if v.upper() in df.columns:
-                mapeamento[v.upper()] = alvo
+            if v.upper() in cols_upper:
+                # Pega o nome real da coluna no df para renomear
+                real_col = df.columns[cols_upper.index(v.upper())]
+                mapeamento[real_col] = alvo
                 break
 
     df.rename(columns=mapeamento, inplace=True)
 
+    # Ajustes adicionais
     if tipo == "int" and "TIPO" in df.columns:
         df["TIPO"] = df["TIPO"].str.upper().str.strip()
     if "PLACA" in df.columns:
@@ -92,9 +96,13 @@ if uploaded_comb and uploaded_ext and uploaded_int:
     df_ext = padroniza_colunas(pd.read_csv(uploaded_ext, sep=";", encoding="utf-8"))
     df_int = padroniza_colunas(pd.read_csv(uploaded_int, sep=";", encoding="utf-8"))
 
+    df_comb = renomear_colunas(df_comb, "comb")
     df_ext = renomear_colunas(df_ext, "ext")
     df_int = renomear_colunas(df_int, "int")
-    df_comb = renomear_colunas(df_comb, "comb")
+
+    st.sidebar.write("Colunas Combustível:", df_comb.columns.tolist())
+    st.sidebar.write("Colunas Externo:", df_ext.columns.tolist())
+    st.sidebar.write("Colunas Interno:", df_int.columns.tolist())
 
     colunas_necessarias_ext = {"PLACA", "CONSUMO", "CUSTO TOTAL", "DATA", "DESCRIÇÃO DO ABASTECIMENTO"}
     colunas_necessarias_int = {"PLACA", "QUANTIDADE DE LITROS", "DATA", "TIPO"}
@@ -130,8 +138,17 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         custo_ext = df_ext_filt["CUSTO TOTAL"].apply(para_float).sum()
         consumo_int = df_int_filt[df_int_filt["TIPO"] == "SAÍDA DE DIESEL"]["QUANTIDADE DE LITROS"].apply(para_float).sum()
 
+        # Tratar data emissão no financeiro
+        if "EMISSAO" in df_comb.columns:
+            df_comb["EMISSAO"] = pd.to_datetime(df_comb["EMISSAO"], dayfirst=True, errors="coerce")
+        else:
+            st.warning("⚠️ Coluna 'EMISSAO' não encontrada no arquivo Combustível (Financeiro). Por favor, verifique o nome da coluna.")
+
+        # Calcular valor médio litro interno
         entradas = df_int[df_int["TIPO"] == "ENTRADA DE DIESEL"].copy()
         entradas["QUANTIDADE DE LITROS"] = entradas["QUANTIDADE DE LITROS"].apply(para_float)
+
+        # Juntar por data com combustivel financeiro para achar custo total da entrada
         entradas = entradas.merge(df_comb, left_on="DATA", right_on="EMISSAO", how="left")
         entradas["CUSTO TOTAL"] = entradas["CUSTO TOTAL"].apply(para_float)
         valor_total_entrada = entradas["CUSTO TOTAL"].sum()
@@ -148,16 +165,14 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         df_ext_copy["FONTE"] = "Externo"
         df_ext_copy["LITROS"] = df_ext_copy["CONSUMO"].apply(para_float)
         df_ext_copy["CUSTO"] = df_ext_copy["CUSTO TOTAL"].apply(para_float)
-        if "KM RODADOS" in df_ext_copy.columns:
-            df_ext_copy["KM RODADOS"] = df_ext_copy["KM RODADOS"].apply(para_float)
-        else:
-            df_ext_copy["KM RODADOS"] = None
+        df_ext_copy["KM RODADOS"] = df_ext_copy["KM RODADOS"].apply(para_float) if "KM RODADOS" in df_ext_copy.columns else None
 
         saidas["DATA"] = pd.to_datetime(saidas["DATA"], dayfirst=True, errors="coerce")
         saidas["FONTE"] = "Interno"
         saidas["LITROS"] = saidas["QUANTIDADE DE LITROS"]
-        saidas["KM RODADOS"] = None  # Será calculado a seguir
+        saidas["KM RODADOS"] = None
 
+        # Calcular km rodados interno pelo delta km atual
         if "KM ATUAL" in df_int_filt.columns:
             df_int_eff = calcula_km_rodado_interno(df_int_filt.copy())
         else:
@@ -251,8 +266,6 @@ if uploaded_comb and uploaded_ext and uploaded_int:
 
         with abas[2]:
             st.markdown("## 🧾 Faturas de Combustível (Financeiro)")
-            if "EMISSAO" in df_comb.columns:
-                df_comb["EMISSAO"] = pd.to_datetime(df_comb["EMISSAO"], dayfirst=True, errors="coerce")
             st.dataframe(df_comb, use_container_width=True)
 
 else:
