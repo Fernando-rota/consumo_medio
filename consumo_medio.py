@@ -135,8 +135,11 @@ if uploaded_comb and uploaded_ext and uploaded_int:
 
         entradas = df_int[df_int["TIPO"] == "ENTRADA DE DIESEL"].copy()
         entradas["QUANTIDADE DE LITROS"] = entradas["QUANTIDADE DE LITROS"].apply(para_float)
+
+        # Cruzar datas para preço médio litro interno
         entradas = entradas.merge(df_comb, left_on="DATA", right_on="EMISSAO", how="left")
         entradas["CUSTO TOTAL"] = entradas["CUSTO TOTAL"].apply(para_float)
+
         valor_total_entrada = entradas["CUSTO TOTAL"].sum()
         litros_entrada = entradas["QUANTIDADE DE LITROS"].sum()
         preco_medio_litro = valor_total_entrada / litros_entrada if litros_entrada else 0
@@ -192,7 +195,16 @@ if uploaded_comb and uploaded_ext and uploaded_int:
             ext_eff = calcula_eficiencia(df_ext_copy.dropna(subset=["KM RODADOS", "LITROS"]), "Externo", limite_eficiente, limite_normal)
             int_eff = calcula_eficiencia(saidas.dropna(subset=["KM RODADOS", "LITROS"]), "Interno", limite_eficiente, limite_normal)
 
-            df_eff_final = pd.concat([ext_eff, int_eff], ignore_index=True)
+            dfs_para_concat = []
+            if not ext_eff.empty:
+                dfs_para_concat.append(ext_eff)
+            if not int_eff.empty:
+                dfs_para_concat.append(int_eff)
+
+            if dfs_para_concat:
+                df_eff_final = pd.concat(dfs_para_concat, ignore_index=True)
+            else:
+                df_eff_final = pd.DataFrame(columns=["PLACA", "KM/LITRO", "CLASSIFICAÇÃO", "POSTO"])
 
             st.markdown("### ⚙️ Classificação de Eficiência por Veículo")
             st.dataframe(df_eff_final.sort_values("KM/LITRO", ascending=False), use_container_width=True)
