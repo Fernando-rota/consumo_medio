@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -5,22 +6,22 @@ from datetime import datetime
 
 # Configuração da página
 st.set_page_config(page_title="Dashboard de Abastecimento", layout="wide")
-st.title("\u26fd Dashboard de Abastecimento de Veículos")
+st.title("Dashboard de Abastecimento de Veículos")
 
 # Upload dos arquivos
-uploaded_comb = st.sidebar.file_uploader("\ud83d\udcc4 Combustível (Financeiro)", type="csv")
-uploaded_ext = st.sidebar.file_uploader("\u26fd Abastecimento Externo", type="csv")
-uploaded_int = st.sidebar.file_uploader("\ud83d\udd03 Abastecimento Interno", type="csv")
+uploaded_comb = st.sidebar.file_uploader("Combustível (Financeiro)", type="csv")
+uploaded_ext = st.sidebar.file_uploader("Abastecimento Externo", type="csv")
+uploaded_int = st.sidebar.file_uploader("Abastecimento Interno", type="csv")
 
 # Filtros globais (temporariamente fixos; serão atualizados após o processamento)
-st.sidebar.markdown("### \ud83d\udee0\ufe0f Filtros Globais")
-placa_filtro = st.sidebar.selectbox("\ud83d\udd0e Filtrar por Placa", ["Todas"])
-comb_filtro = st.sidebar.selectbox("\u26fd Tipo de Combustível", ["Todos"])
-data_inicio = st.sidebar.date_input("\ud83d\udcc6 Data Inicial", datetime(2024, 1, 1))
-data_fim = st.sidebar.date_input("\ud83d\udcc6 Data Final", datetime.now())
+st.sidebar.markdown("### Filtros Globais")
+placa_filtro = st.sidebar.selectbox("Filtrar por Placa", ["Todas"])
+comb_filtro = st.sidebar.selectbox("Tipo de Combustível", ["Todos"])
+data_inicio = st.sidebar.date_input("Data Inicial", datetime(2024, 1, 1))
+data_fim = st.sidebar.date_input("Data Final", datetime.now())
 
 # Limites de eficiência
-st.sidebar.markdown("### \u2699\ufe0f Classificação de Eficiência (km/l)")
+st.sidebar.markdown("### Classificação de Eficiência (km/l)")
 limite_eficiente = st.sidebar.slider("Eficiente (min km/l)", 1.0, 10.0, 3.0, 0.1)
 limite_normal = st.sidebar.slider("Normal (min km/l)", 0.5, limite_eficiente, 2.0, 0.1)
 
@@ -55,10 +56,10 @@ if uploaded_comb and uploaded_ext and uploaded_int:
 
     # Atualiza filtros globais com base nos dados
     if result and "filtros" in result:
-        st.session_state["placa_global"] = st.sidebar.selectbox("\ud83d\udd0e Filtrar por Placa", ["Todas"] + result["filtros"]["placas"])
-        st.session_state["comb_global"] = st.sidebar.selectbox("\u26fd Tipo de Combustível", ["Todos"] + result["filtros"]["combustiveis"])
-        st.session_state["data_inicio"] = st.sidebar.date_input("\ud83d\udcc6 Data Inicial", result["filtros"]["data_min"])
-        st.session_state["data_fim"] = st.sidebar.date_input("\ud83d\udcc6 Data Final", result["filtros"]["data_max"])
+        st.session_state["placa_global"] = st.sidebar.selectbox("Filtrar por Placa", ["Todas"] + result["filtros"]["placas"])
+        st.session_state["comb_global"] = st.sidebar.selectbox("Tipo de Combustível", ["Todos"] + result["filtros"]["combustiveis"])
+        st.session_state["data_inicio"] = st.sidebar.date_input("Data Inicial", result["filtros"]["data_min"])
+        st.session_state["data_fim"] = st.sidebar.date_input("Data Final", result["filtros"]["data_max"])
 
     # Filtros aplicados ao dataframe final
     df_filtrado = result["df_all"].copy()
@@ -69,32 +70,32 @@ if uploaded_comb and uploaded_ext and uploaded_int:
                                   (df_filtrado["DATA"] <= pd.to_datetime(st.session_state["data_fim"]))]
 
     # Abas principais
-    abas = st.tabs(["\ud83d\udcca Indicadores", "\ud83d\udcc8 Gráficos & Rankings", "\ud83d\udcdf Faturas"])
+    abas = st.tabs(["Indicadores", "Gráficos & Rankings", "Faturas"])
 
     with abas[0]:
-        st.subheader("\ud83d\udcca Indicadores Resumidos")
+        st.subheader("Indicadores Resumidos")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total Externo (L)", f"{result['consumo_ext']:.1f}")
         col2.metric("Total Interno (L)", f"{result['consumo_int']:.1f}")
         col3.metric("Custo Total Externo", f"R$ {result['custo_ext']:,.2f}")
         col4.metric("Custo Estimado Interno", f"R$ {result['custo_int']:,.2f}")
 
-        st.markdown("### \u2699\ufe0f Eficiência por Veículo")
+        st.markdown("### Eficiência por Veículo")
         st.dataframe(result['df_eff_final'], use_container_width=True)
         ineficientes = result['df_eff_final'][result['df_eff_final']['CLASSIFICAÇÃO'] == "Ineficiente"]
         if not ineficientes.empty:
-            st.warning(f"\u26a0\ufe0f {len(ineficientes)} veículos foram classificados como Ineficientes")
+            st.warning(f"{len(ineficientes)} veículos foram classificados como Ineficientes")
             st.dataframe(ineficientes, use_container_width=True)
 
     with abas[1]:
-        st.subheader("\ud83d\udcc8 Gráficos")
+        st.subheader("Gráficos")
         if not df_filtrado.empty:
             fig1 = px.bar(df_filtrado.groupby("PLACA")["LITROS"].sum().reset_index(), x="PLACA", y="LITROS", color="PLACA")
             st.plotly_chart(fig1, use_container_width=True)
 
     with abas[2]:
-        st.subheader("\ud83d\udcdf Visualização das Faturas")
+        st.subheader("Visualização das Faturas")
         st.dataframe(result["df_comb"], use_container_width=True)
 
 else:
-    st.warning("\u2b05\ufe0f Envie os 3 arquivos CSV na barra lateral para iniciar.")
+    st.warning("Envie os 3 arquivos CSV na barra lateral para iniciar.")
