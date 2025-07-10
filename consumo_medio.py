@@ -112,8 +112,7 @@ class DataProcessor:
         
         df_grouped["KM/LITRO"] = df_grouped["KM_LITRO"] / df_grouped["LITROS"]
         df_grouped["CLASSIFICAÇÃO"] = df_grouped["KM/LITRO"].apply(
-            lambda x: DataProcessor.classifica_eficiencia(x, lim_ef, lim_norm)
-        )
+            lambda x: DataProcessor.classifica_eficiencia(x, lim_ef, lim_norm))
         df_grouped["POSTO"] = posto
         
         return df_grouped[["PLACA", "KM/LITRO", "CLASSIFICAÇÃO", "POSTO"]]
@@ -424,7 +423,7 @@ def main():
             # Aplicar filtro de data
             processed_data['df_all'] = processed_data['df_all'][
                 (processed_data['df_all']["DATA"] >= pd.to_datetime(data_inicio)) & 
-                (processed_data['df_all']["DATA"] <= pd.to_datetime(data_fim))
+                (processed_data['df_all']["DATA"] <= pd.to_datetime(data_fim))]
             
             # Filtro por placa e tipo de combustível
             placas_validas = sorted(set(processed_data['df_ext']["PLACA"]).union(
