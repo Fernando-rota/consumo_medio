@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import io # Importar io para lidar com arquivos em memória
 
 # --- Streamlit Page Configuration ---
 st.set_page_config(page_title="Dashboard de Abastecimento", layout="wide")
@@ -10,7 +11,8 @@ st.title("⛽ Dashboard de Abastecimento de Veículos")
 
 def padroniza_colunas(df):
     """Standardizes DataFrame column names by stripping whitespace and converting to uppercase."""
-    df.columns = df.columns.str.strip().str.upper()
+    # Garante que as colunas sejam strings antes de aplicar str.strip().str.upper()
+    df.columns = [str(col).strip().upper() for col in df.columns]
     return df
 
 def para_float(valor):
@@ -23,10 +25,57 @@ def para_float(valor):
     except ValueError:
         return None
 
+# Função para tentar ler CSVs com diferentes delimitadores
+def try_read_csv(uploaded_file):
+    """
+    Tries to read a CSV file with common delimiters, using 'on_bad_lines="skip"'
+    and the 'python' engine for better error handling.
+    """
+    # Rewind the file pointer to the beginning for multiple read attempts
+    uploaded_file.seek(0)
+    
+    # Try comma
+    try:
+        df = pd.read_csv(uploaded_file, sep=",", encoding="utf-8", on_bad_lines='skip', engine='python')
+        if not df.empty and len(df.columns) > 1: # Basic check if comma worked
+            return df
+    except Exception:
+        pass # Ignore error and try next delimiter
+
+    uploaded_file.seek(0) # Rewind for next attempt
+    # Try semicolon
+    try:
+        df = pd.read_csv(uploaded_file, sep=";", encoding="utf-8", on_bad_lines='skip', engine='python')
+        if not df.empty and len(df.columns) > 1: # Basic check if semicolon worked
+            return df
+    except Exception:
+        pass # Ignore error and try next delimiter
+
+    uploaded_file.seek(0) # Rewind for next attempt
+    # Fallback: Try with no specified separator, letting pandas infer (less reliable but can work)
+    try:
+        df = pd.read_csv(uploaded_file, encoding="utf-8", on_bad_lines='skip', engine='python')
+        if not df.empty and len(df.columns) > 1:
+            return df
+    except Exception:
+        pass
+
+    uploaded_file.seek(0) # Rewind for next attempt
+    # Try with Latin-1 encoding as a last resort for CSVs
+    try:
+        df = pd.read_csv(uploaded_file, encoding="latin-1", on_bad_lines='skip', engine='python')
+        if not df.empty and len(df.columns) > 1:
+            return df
+    except Exception:
+        pass
+
+    return None # Return None if no method worked
+
+
 @st.cache_data # Cache data loading to improve performance on subsequent runs
 def load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int):
     """
-    Loads, preprocesses, and validates the uploaded CSV files.
+    Loads, preprocesses, and validates the uploaded CSV/XLSX files.
 
     Args:
         uploaded_comb: Uploaded file object for financial data.
@@ -39,42 +88,50 @@ def load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int):
     df_comb, df_ext, df_int = None, None, None
     errors = []
 
-    # Using comma as separator based on user confirmation
-    csv_separator = ","
+    # Helper to load either CSV or XLSX
+    def load_file(uploaded_file_obj, file_type_name):
+        df_loaded = None
+        file_extension = uploaded_file_obj.name.split('.')[-1].lower()
 
-    # --- Load DataFrames with error handling ---
-    try:
-        df_comb = padroniza_colunas(pd.read_csv(uploaded_comb, sep=csv_separator, encoding="utf-8"))
-    except Exception as e:
-        errors.append(f"Erro ao carregar arquivo 'Combustível (Financeiro)': {e}")
+        try:
+            if file_extension == 'csv':
+                # Pass the BytesIO object to try_read_csv
+                df_loaded = try_read_csv(io.BytesIO(uploaded_file_obj.getvalue()))
+                if df_loaded is None:
+                    raise ValueError(f"Não foi possível carregar o arquivo CSV '{file_type_name}'. Verifique o formato e o delimitador.")
+            elif file_extension == 'xlsx':
+                df_loaded = pd.read_excel(uploaded_file_obj)
+            else:
+                raise ValueError(f"Formato de arquivo não suportado para '{file_type_name}'. Por favor, use .csv ou .xlsx.")
 
-    try:
-        df_ext = padroniza_colunas(pd.read_csv(uploaded_ext, sep=csv_separator, encoding="utf-8"))
-    except Exception as e:
-        errors.append(f"Erro ao carregar arquivo 'Abastecimento Externo': {e}")
+            return padroniza_colunas(df_loaded) # Standardize columns after loading
+        except Exception as e:
+            errors.append(f"Erro ao carregar arquivo '{file_type_name}': {e}")
+            return None
 
-    try:
-        df_int = padroniza_colunas(pd.read_csv(uploaded_int, sep=csv_separator, encoding="utf-8"))
-    except Exception as e:
-        errors.append(f"Erro ao carregar arquivo 'Abastecimento Interno': {e}")
+    # Load each file
+    df_comb = load_file(uploaded_comb, 'Combustível (Financeiro)')
+    df_ext = load_file(uploaded_ext, 'Abastecimento Externo')
+    df_int = load_file(uploaded_int, 'Abastecimento Interno')
 
-    if errors:
+    if errors: # Check for errors immediately after trying to load all files
         for error in errors:
             st.error(f"❌ {error}")
-        return None, None, None, None, None # Return None for all if any file fails to load
+        return None, None, None, None, None
 
     # --- Validate Required Columns (UPDATED for 'DATA HORA' in internal sheet) ---
     required_cols_ext = {"PLACA", "CONSUMO", "CUSTO TOTAL", "DATA"}
-    required_cols_int = {"PLACA", "QUANTIDADE DE LITROS", "DATA HORA"} # Expect 'DATA HORA' in internal CSV
+    # Expect 'DATA HORA' in internal CSV/XLSX. Padroniza_colunas ensures it's 'DATA HORA' (uppercase)
+    required_cols_int = {"PLACA", "QUANTIDADE DE LITROS", "DATA HORA"} 
 
     missing_ext = required_cols_ext - set(df_ext.columns)
     missing_int = required_cols_int - set(df_int.columns)
 
     if missing_ext:
-        st.error(f"❌ O arquivo 'Abastecimento Externo' está faltando colunas essenciais: {', '.join(missing_ext)}. Por favor, verifique o cabeçalho do CSV.")
+        st.error(f"❌ O arquivo 'Abastecimento Externo' está faltando colunas essenciais: {', '.join(missing_ext)}. Por favor, verifique o cabeçalho do arquivo.")
         return None, None, None, None, None
     if missing_int:
-        st.error(f"❌ O arquivo 'Abastecimento Interno' está faltando colunas essenciais: {', '.join(missing_int)}. Por favor, verifique o cabeçalho do CSV.")
+        st.error(f"❌ O arquivo 'Abastecimento Interno' está faltando colunas essenciais: {', '.join(missing_int)}. Por favor, verifique o cabeçalho do arquivo.")
         return None, None, None, None, None
 
     # --- Data Type Conversions and Cleaning ---
@@ -85,17 +142,16 @@ def load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int):
     df_ext["DATA"] = pd.to_datetime(df_ext["DATA"], dayfirst=True, errors="coerce")
 
     # Rename 'DATA HORA' to 'DATA' in df_int for consistency, then convert to datetime
+    # The padroniza_colunas already made it 'DATA HORA' (uppercase)
     if 'DATA HORA' in df_int.columns:
         df_int.rename(columns={'DATA HORA': 'DATA'}, inplace=True)
     df_int["DATA"] = pd.to_datetime(df_int["DATA"], dayfirst=True, errors="coerce")
 
-
     # Apply para_float to numerical columns, including optional ones using .get()
     df_ext["CONSUMO"] = df_ext["CONSUMO"].apply(para_float)
     df_ext["CUSTO TOTAL"] = df_ext["CUSTO TOTAL"].apply(para_float)
-    # Using .get() with a default Series ensures the column exists even if missing in original CSV
-    df_ext["KM RODADOS"] = df_ext.get("KM RODADOS", pd.Series([None]*len(df_ext))).apply(para_float)
-    df_ext["KM/LITRO"] = df_ext.get("KM/LITRO", pd.Series([None]*len(df_ext))).apply(para_float)
+    df_ext["KM RODADOS"] = df_ext.get("KM RODADOS", pd.Series([None]*len(df_ext), index=df_ext.index)).apply(para_float)
+    df_ext["KM/LITRO"] = df_ext.get("KM/LITRO", pd.Series([None]*len(df_ext), index=df_ext.index)).apply(para_float)
 
     df_int["QUANTIDADE DE LITROS"] = df_int["QUANTIDADE DE LITROS"].apply(para_float)
 
@@ -106,7 +162,6 @@ def load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int):
         df_comb["VENCIMENTO"] = pd.to_datetime(df_comb["VENCIMENTO"], dayfirst=True, errors="coerce")
 
     # Determine unique valid plates and fuel types for filters
-    # Filter out common invalid/placeholder plate values
     placas_validas = sorted(set(df_ext["PLACA"]).union(df_int["PLACA"]) - {"-", "CORREÇÃO", "NAN", "", "NONE"})
     combustiveis = []
     if "DESCRIÇÃO DO ABASTECIMENTO" in df_ext.columns:
@@ -169,9 +224,9 @@ def calculate_kpis_and_combine_data(df_ext_filtered, df_int_filtered):
     # Ensure all common columns are present in both DFs before concat, fill with None if not
     for col in common_cols:
         if col not in df_ext_processed.columns:
-            df_ext_processed[col] = pd.Series([None] * len(df_ext_processed))
+            df_ext_processed[col] = pd.Series([None] * len(df_ext_processed), index=df_ext_processed.index)
         if col not in df_int_processed.columns:
-            df_int_processed[col] = pd.Series([None] * len(df_int_processed))
+            df_int_processed[col] = pd.Series([None] * len(df_int_processed), index=df_int_processed.index)
 
     # Concatenate data for combined analysis
     df_all = pd.concat([
@@ -180,7 +235,6 @@ def calculate_kpis_and_combine_data(df_ext_filtered, df_int_filtered):
     ], ignore_index=True)
 
     # Calculate KM/L for external fueling.
-    # Assuming 'KM RODADOS' is the actual distance driven since the last fill-up.
     df_efficiency = df_ext_processed.dropna(subset=["KM RODADOS", "LITROS"]).copy()
     if not df_efficiency.empty:
         # Avoid division by zero for KM/L calculation
@@ -195,10 +249,10 @@ def calculate_kpis_and_combine_data(df_ext_filtered, df_int_filtered):
     return consumo_ext, custo_ext, consumo_int, custo_int_estimated, df_all, df_efficiency, avg_price_per_liter_ext
 
 # --- Streamlit Sidebar: File Uploads ---
-st.sidebar.header("📁 Enviar arquivos .csv")
-uploaded_comb = st.sidebar.file_uploader("📄 Combustível (Financeiro)", type="csv")
-uploaded_ext = st.sidebar.file_uploader("⛽ Abastecimento Externo", type="csv")
-uploaded_int = st.sidebar.file_uploader("🛢️ Abastecimento Interno", type="csv")
+st.sidebar.header("📁 Enviar arquivos (.csv ou .xlsx)")
+uploaded_comb = st.sidebar.file_uploader("📄 Combustível (Financeiro)", type=["csv", "xlsx"])
+uploaded_ext = st.sidebar.file_uploader("⛽ Abastecimento Externo", type=["csv", "xlsx"])
+uploaded_int = st.sidebar.file_uploader("🛢️ Abastecimento Interno", type=["csv", "xlsx"])
 
 # --- Main Dashboard Logic ---
 if uploaded_comb and uploaded_ext and uploaded_int:
@@ -206,7 +260,7 @@ if uploaded_comb and uploaded_ext and uploaded_int:
     df_comb, df_ext, df_int, placas_validas, combustiveis = load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int)
 
     # Proceed only if all files were loaded and validated successfully (df_comb is not None)
-    if df_comb is not None:
+    if df_comb is not None and df_ext is not None and df_int is not None: # Check all DFs are not None
         st.sidebar.markdown("---")
         st.sidebar.header("⚙️ Filtros")
 
@@ -246,11 +300,9 @@ if uploaded_comb and uploaded_ext and uploaded_int:
                 start_date_filter, end_date_filter = date_range_selection
             elif len(date_range_selection) == 1:
                 st.sidebar.info("Selecione um intervalo de duas datas para aplicar o filtro.")
-                # If only one date is selected, don't apply date filter yet, use full range conceptually
                 start_date_filter, end_date_filter = global_min_date, global_max_date
         else:
             st.sidebar.info("Não há dados de data válidos para o filtro de período.")
-            # If no valid dates, set to full original dataframes conceptually
             start_date_filter, end_date_filter = None, None
 
         # --- Apply Filters in Order: Date -> Placa -> Combustível ---
@@ -269,7 +321,6 @@ if uploaded_comb and uploaded_ext and uploaded_int:
                 (df_int_filtered_by_date["DATA"] >= pd.Timestamp(start_date_filter)) &
                 (df_int_filtered_by_date["DATA"] <= pd.Timestamp(end_date_filter))
             ]
-
 
         # Apply Placa filter
         df_ext_final_filtered = df_ext_filtered_by_date[df_ext_filtered_by_date["PLACA"] == placa_selecionada] if placa_selecionada != "Todas" else df_ext_filtered_by_date
@@ -376,4 +427,4 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         st.error("Houve um problema ao carregar ou validar um dos arquivos. Por favor, verifique as mensagens de erro acima e tente novamente.")
 
 else: # This block executes if not all 3 files are uploaded
-    st.warning("⬅️ Por favor, envie os 3 arquivos `.csv` na barra lateral esquerda para visualizar o dashboard completo.")
+    st.warning("⬅️ Por favor, envie os 3 arquivos (`.csv` ou `.xlsx`) na barra lateral esquerda para visualizar o dashboard completo.")
