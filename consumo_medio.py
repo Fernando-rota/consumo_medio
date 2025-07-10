@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import time
-from st_aggrid import AgGrid, GridOptionsBuilder
 
 # Configuração da página
 st.set_page_config(page_title="Dashboard de Abastecimento", layout="wide")
@@ -176,17 +175,9 @@ class DashboardRenderer:
     def render_efficiency_table(df_eff_final):
         """Renderiza a tabela de eficiência"""
         st.markdown("### ⚙️ Classificação de Eficiência por Veículo")
-        
-        gb = GridOptionsBuilder.from_dataframe(df_eff_final)
-        gb.configure_pagination(paginationAutoPageSize=True)
-        gb.configure_side_bar()
-        gb.configure_default_column(groupable=True, sortable=True, filterable=True)
-        grid_options = gb.build()
-        
-        AgGrid(df_eff_final.sort_values("KM/LITRO", ascending=False), 
-               gridOptions=grid_options, 
-               theme='streamlit',
-               fit_columns_on_grid_load=True)
+        st.dataframe(df_eff_final.sort_values("KM/LITRO", ascending=False), 
+                    height=400,
+                    use_container_width=True)
 
     @staticmethod
     def render_top_vehicles(df_eff_final):
@@ -495,17 +486,9 @@ def main():
                 if "PAGAMENTO" in processed_data['df_comb'].columns:
                     processed_data['df_comb']["PAGAMENTO"] = pd.to_datetime(
                         processed_data['df_comb']["PAGAMENTO"], dayfirst=True, errors="coerce")
-                    
-                    gb = GridOptionsBuilder.from_dataframe(processed_data['df_comb'].sort_values("EMISSAO", ascending=False))
-                    gb.configure_pagination(paginationAutoPageSize=True)
-                    gb.configure_side_bar()
-                    gb.configure_default_column(groupable=True, sortable=True, filterable=True)
-                    grid_options = gb.build()
-                    
-                    AgGrid(processed_data['df_comb'].sort_values("EMISSAO", ascending=False), 
-                          gridOptions=grid_options, 
-                          theme='streamlit',
-                          fit_columns_on_grid_load=True)
+                    st.dataframe(processed_data['df_comb'].sort_values("EMISSAO", ascending=False), 
+                               height=400,
+                               use_container_width=True)
                 else:
                     st.info("Arquivo Combustível não possui a coluna 'PAGAMENTO' para exibir.")
         
