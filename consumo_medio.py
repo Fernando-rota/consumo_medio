@@ -4,11 +4,12 @@ import plotly.express as px
 
 st.set_page_config(page_title="Dashboard de Abastecimento", layout="wide")
 
+# --- Leitura dos arquivos CSV ---
 @st.cache_data
 def load_data():
-    df_comb = pd.read_excel("abastecimento/combustivel.xlsx")
-    df_ext = pd.read_excel("abastecimento/abastecimento_externo.xlsx")
-    df_int = pd.read_excel("abastecimento/abastecimento_interno.xlsx")
+    df_comb = pd.read_csv("abastecimento/combustivel.csv", sep=";", encoding="utf-8")
+    df_ext = pd.read_csv("abastecimento/abastecimento_externo.csv", sep=";", encoding="utf-8")
+    df_int = pd.read_csv("abastecimento/abastecimento_interno.csv", sep=";", encoding="utf-8")
     return df_comb, df_ext, df_int
 
 df_comb, df_ext, df_int = load_data()
@@ -101,12 +102,12 @@ fig_eff = px.bar(df_eff_media, x="Placa", y="KM/Litro Calc", text_auto=".2f", co
 fig_eff.update_layout(yaxis_title="KM por Litro (média)")
 st.plotly_chart(fig_eff, use_container_width=True)
 
-# --- 🥇 Ranking de Consumo
+# --- 🏅 Ranking de Consumo
 st.markdown("## 🏅 Ranking de Veículos por Consumo Total")
 ranking = df_all.groupby("Placa")["Litros"].sum().reset_index().sort_values("Litros", ascending=False)
 st.dataframe(ranking, use_container_width=True)
 
-# --- ⚖️ Comparativo Interno x Externo
+# --- ⚖️ Comparativo Interno vs Externo
 st.markdown("## ⚖️ Comparativo: Interno x Externo")
 
 comparativo = df_all.groupby("Fonte").agg(
