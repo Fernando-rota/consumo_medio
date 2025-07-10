@@ -12,12 +12,15 @@ uploaded_comb = st.sidebar.file_uploader("📄 Combustível (Financeiro)", type=
 uploaded_ext = st.sidebar.file_uploader("⛽ Abastecimento Externo", type="csv")
 uploaded_int = st.sidebar.file_uploader("🛢️ Abastecimento Interno", type="csv")
 
-# Padronizar colunas
+# Config sliders para classificação de eficiência
+st.sidebar.markdown("### ⚙️ Configuração de Classificação de Eficiência (km/l)")
+limite_eficiente = st.sidebar.slider("Limite para 'Eficiente' (km/l)", min_value=1.0, max_value=10.0, value=3.0, step=0.1)
+limite_normal = st.sidebar.slider("Limite para 'Normal' (km/l)", min_value=0.5, max_value=limite_eficiente, value=2.0, step=0.1)
+
 def padroniza_colunas(df):
     df.columns = df.columns.str.strip().str.upper()
     return df
 
-# Renomear colunas comuns
 def renomear_colunas(df, tipo):
     renomeios_comuns = {
         "DATA": ["DATA", "Data", " data"],
@@ -26,7 +29,10 @@ def renomear_colunas(df, tipo):
         "QUANTIDADE DE LITROS": ["QUANTIDADE DE LITROS", "quantidade de litros", "Qtd Litros"],
         "CONSUMO": ["CONSUMO", "Consumo"],
         "CUSTO TOTAL": ["CUSTO TOTAL", "VALOR PAGO", "valor total"],
-        "DESCRIÇÃO DO ABASTECIMENTO": ["DESCRIÇÃO DO ABASTECIMENTO", "TIPO DE COMBUSTIVEL", "COMBUSTÍVEL"]
+        "DESCRIÇÃO DO ABASTECIMENTO": ["DESCRIÇÃO DO ABASTECIMENTO", "TIPO DE COMBUSTIVEL", "COMBUSTÍVEL"],
+        "KM ATUAL": ["KM ATUAL", "KM ATUAL", "KM_ATUAL"],
+        "KM RODADOS": ["KM RODADOS", "KM RODADOS", "KM_RODADOS"],
+        "EMISSAO": ["EMISSAO", "Emissão", "EMISSÃO"]
     }
 
     mapeamento = {}
@@ -44,7 +50,6 @@ def renomear_colunas(df, tipo):
         df["PLACA"] = df["PLACA"].astype(str).str.upper().str.strip().str.replace(" ", "")
     return df
 
-# Converter strings para float
 def para_float(valor):
     if pd.isna(valor):
         return None
@@ -53,6 +58,34 @@ def para_float(valor):
         return float(valor_str)
     except:
         return None
+
+def classifica_eficiencia(km_litro, lim_ef, lim_norm):
+    if km_litro >= lim_ef:
+        return "Eficiente"
+    elif km_litro >= lim_norm:
+        return "Normal"
+    else:
+        return "Ineficiente"
+
+def calcula_km_rodado_interno(df):
+    res = []
+    for placa, grupo in df.sort_values("DATA").groupby("PLACA"):
+        grupo = grupo.reset_index(drop=True)
+        grupo["KM RODADOS"] = grupo["KM ATUAL"].diff().fillna(0)
+        grupo.loc[grupo["KM RODADOS"] < 0, "KM RODADOS"] = 0
+        res.append(grupo)
+    return pd.concat(res)
+
+def calcula_eficiencia(df, fonte, lim_ef, lim_norm):
+    df = df.dropna(subset=["KM RODADOS", "LITROS"])
+    if df.empty:
+        return pd.DataFrame(columns=["PLACA", "KM/LITRO", "CLASSIFICAÇÃO", "FONTE"])
+    df_grouped = df.groupby("PLACA").apply(
+        lambda x: (x["KM RODADOS"].sum() / x["LITROS"].sum()) if x["LITROS"].sum() > 0 else 0
+    ).reset_index(name="KM/LITRO")
+    df_grouped["CLASSIFICAÇÃO"] = df_grouped["KM/LITRO"].apply(lambda x: classifica_eficiencia(x, lim_ef, lim_norm))
+    df_grouped["FONTE"] = fonte
+    return df_grouped
 
 if uploaded_comb and uploaded_ext and uploaded_int:
     df_comb = padroniza_colunas(pd.read_csv(uploaded_comb, sep=";", encoding="utf-8"))
@@ -97,7 +130,6 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         custo_ext = df_ext_filt["CUSTO TOTAL"].apply(para_float).sum()
         consumo_int = df_int_filt[df_int_filt["TIPO"] == "SAÍDA DE DIESEL"]["QUANTIDADE DE LITROS"].apply(para_float).sum()
 
-        # Cálculo do valor médio do litro interno
         entradas = df_int[df_int["TIPO"] == "ENTRADA DE DIESEL"].copy()
         entradas["QUANTIDADE DE LITROS"] = entradas["QUANTIDADE DE LITROS"].apply(para_float)
         entradas = entradas.merge(df_comb, left_on="DATA", right_on="EMISSAO", how="left")
@@ -106,28 +138,38 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         litros_entrada = entradas["QUANTIDADE DE LITROS"].sum()
         preco_medio_litro = valor_total_entrada / litros_entrada if litros_entrada else 0
 
-        # Custo das saídas
         saidas = df_int_filt[df_int_filt["TIPO"] == "SAÍDA DE DIESEL"].copy()
         saidas["QUANTIDADE DE LITROS"] = saidas["QUANTIDADE DE LITROS"].apply(para_float)
         saidas["CUSTO"] = saidas["QUANTIDADE DE LITROS"] * preco_medio_litro
         custo_int = saidas["CUSTO"].sum()
 
-        # Preparar DataFrame consolidado
         df_ext_copy = df_ext_filt.copy()
         df_ext_copy["DATA"] = pd.to_datetime(df_ext_copy["DATA"], dayfirst=True, errors="coerce")
         df_ext_copy["FONTE"] = "Externo"
         df_ext_copy["LITROS"] = df_ext_copy["CONSUMO"].apply(para_float)
         df_ext_copy["CUSTO"] = df_ext_copy["CUSTO TOTAL"].apply(para_float)
+        if "KM RODADOS" in df_ext_copy.columns:
+            df_ext_copy["KM RODADOS"] = df_ext_copy["KM RODADOS"].apply(para_float)
+        else:
+            df_ext_copy["KM RODADOS"] = None
 
         saidas["DATA"] = pd.to_datetime(saidas["DATA"], dayfirst=True, errors="coerce")
         saidas["FONTE"] = "Interno"
         saidas["LITROS"] = saidas["QUANTIDADE DE LITROS"]
-        saidas["KM RODADOS"] = None
-        saidas["KM/LITRO"] = None
+        saidas["KM RODADOS"] = None  # Será calculado a seguir
+
+        if "KM ATUAL" in df_int_filt.columns:
+            df_int_eff = calcula_km_rodado_interno(df_int_filt.copy())
+        else:
+            df_int_eff = df_int_filt.copy()
+            df_int_eff["KM RODADOS"] = None
+
+        df_int_eff["LITROS"] = df_int_eff["QUANTIDADE DE LITROS"].apply(para_float)
+        df_int_eff = df_int_eff[df_int_eff["TIPO"] == "SAÍDA DE DIESEL"]
 
         df_all = pd.concat([
-            df_ext_copy[["DATA", "PLACA", "LITROS", "CUSTO", "FONTE"]],
-            saidas[["DATA", "PLACA", "LITROS", "CUSTO", "FONTE"]]
+            df_ext_copy[["DATA", "PLACA", "LITROS", "CUSTO", "FONTE", "KM RODADOS"]],
+            df_int_eff[["DATA", "PLACA", "LITROS", "CUSTO", "FONTE", "KM RODADOS"]],
         ], ignore_index=True)
 
         # Filtro por período
@@ -138,7 +180,6 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         data_fim = st.sidebar.date_input("Data Final", max_data)
         df_all = df_all[(df_all["DATA"] >= pd.to_datetime(data_inicio)) & (df_all["DATA"] <= pd.to_datetime(data_fim))]
 
-        # Abas
         abas = st.tabs(["📊 Indicadores", "📈 Gráficos & Rankings", "🧾 Financeiro"])
 
         with abas[0]:
@@ -178,6 +219,35 @@ if uploaded_comb and uploaded_ext and uploaded_int:
             col1, col2 = st.columns(2)
             col1.plotly_chart(px.pie(comparativo, values="LITROS", names="FONTE", title="Volume Abastecido"), use_container_width=True)
             col2.plotly_chart(px.pie(comparativo, values="CUSTO", names="FONTE", title="Custo Total"), use_container_width=True)
+
+            # Classificação de eficiência personalizada e unificada
+            st.markdown("## ⚙️ Eficiência (km/l) - Externo e Interno")
+
+            df_ext_eff = df_ext_copy.copy()
+            df_int_eff_filtered = df_int_eff.copy()
+
+            df_ext_eff["LITROS"] = df_ext_eff["LITROS"].apply(para_float)
+            df_int_eff_filtered["LITROS"] = df_int_eff_filtered["LITROS"].apply(para_float)
+
+            df_ext_eff = df_ext_eff.dropna(subset=["KM RODADOS", "LITROS"])
+            df_int_eff_filtered = df_int_eff_filtered.dropna(subset=["KM RODADOS", "LITROS"])
+
+            df_ext_class = calcula_eficiencia(df_ext_eff, "Externo", limite_eficiente, limite_normal)
+            df_int_class = calcula_eficiencia(df_int_eff_filtered, "Interno", limite_eficiente, limite_normal)
+
+            df_eff_total = pd.concat([df_ext_class, df_int_class], ignore_index=True)
+
+            fig_eff = px.bar(
+                df_eff_total.sort_values("KM/LITRO", ascending=False),
+                x="PLACA", y="KM/LITRO", color="CLASSIFICAÇÃO",
+                text_auto=".2f",
+                title="Eficiência por Veículo (km/l) - Interno e Externo"
+            )
+            fig_eff.update_layout(yaxis_title="KM por Litro (Média)")
+            st.plotly_chart(fig_eff, use_container_width=True)
+
+            st.markdown("### 📋 Classificação de Eficiência")
+            st.dataframe(df_eff_total.sort_values(["FONTE", "KM/LITRO"], ascending=[True, False]), use_container_width=True)
 
         with abas[2]:
             st.markdown("## 🧾 Faturas de Combustível (Financeiro)")
