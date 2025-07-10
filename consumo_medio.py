@@ -33,17 +33,20 @@ def renomear_colunas(df, tipo):
     }
     mapeamento = {}
     cols_upper = [c.upper() for c in df.columns]
-    for alvo, variações in renomeios_comuns.items():
-        for v in variações:
+    for alvo, variacoes in renomeios_comuns.items():
+        for v in variacoes:
             if v.upper() in cols_upper:
                 real_col = df.columns[cols_upper.index(v.upper())]
                 mapeamento[real_col] = alvo
                 break
     df.rename(columns=mapeamento, inplace=True)
+    
+    # Tratar coluna TIPO - converte para string antes de aplicar str methods
     if tipo == "int" and "TIPO" in df.columns:
-        df["TIPO"] = df["TIPO"].str.upper().str.strip()
+        df["TIPO"] = df["TIPO"].astype(str).str.upper().str.strip()
+    # Tratar coluna PLACA - converte para string e remove espaços, trata NaN
     if "PLACA" in df.columns:
-        df["PLACA"] = df["PLACA"].astype(str).str.upper().str.strip().str.replace(" ", "")
+        df["PLACA"] = df["PLACA"].fillna("").astype(str).str.upper().str.strip().str.replace(" ", "")
     return df
 
 def para_float(valor):
@@ -65,6 +68,9 @@ def classifica_eficiencia(km_litro, lim_ef, lim_norm):
 
 def calcula_km_rodado_interno(df):
     df = df.copy()
+    if "KM ATUAL" not in df.columns:
+        df["KM RODADOS"] = None
+        return df
     df["KM ATUAL"] = pd.to_numeric(df["KM ATUAL"], errors="coerce")
     res = []
     for placa, grupo in df.sort_values("DATA").groupby("PLACA"):
@@ -75,6 +81,9 @@ def calcula_km_rodado_interno(df):
     return pd.concat(res)
 
 def calcula_eficiencia(df, posto, lim_ef, lim_norm):
+    # Garantir colunas e drop NA
+    if "KM RODADOS" not in df.columns or "LITROS" not in df.columns:
+        return pd.DataFrame(columns=["PLACA", "KM/LITRO", "CLASSIFICAÇÃO", "POSTO"])
     df = df.dropna(subset=["KM RODADOS", "LITROS"])
     if df.empty:
         return pd.DataFrame(columns=["PLACA", "KM/LITRO", "CLASSIFICAÇÃO", "POSTO"])
@@ -100,12 +109,18 @@ if uploaded_comb and uploaded_ext and uploaded_int:
     faltando_ext = colunas_necessarias_ext - set(df_ext.columns)
     faltando_int = colunas_necessarias_int - set(df_int.columns)
 
+    # Corrigido para mostrar ambos os erros simultaneamente
     if faltando_ext:
         st.error(f"❌ Abastecimento Externo está faltando colunas: {faltando_ext}")
-    elif faltando_int:
+    if faltando_int:
         st.error(f"❌ Abastecimento Interno está faltando colunas: {faltando_int}")
-    else:
-        placas_validas = sorted(set(df_ext["PLACA"]).union(df_int["PLACA"]) - {"-", "CORREÇÃO", ""})
+
+    if not faltando_ext and not faltando_int:
+        # Tratamento de NaN nas placas
+        placas_ext = df_ext["PLACA"].dropna().unique()
+        placas_int = df_int["PLACA"].dropna().unique()
+        placas_validas = sorted(set(placas_ext).union(placas_int) - {"-", "CORREÇÃO", ""})
+
         combustiveis = sorted(df_ext["DESCRIÇÃO DO ABASTECIMENTO"].dropna().unique())
 
         col1, col2 = st.columns(2)
@@ -136,23 +151,35 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         entradas = df_int[df_int["TIPO"] == "ENTRADA DE DIESEL"].copy()
         entradas["QUANTIDADE DE LITROS"] = entradas["QUANTIDADE DE LITROS"].apply(para_float)
 
-        # Cruzar datas para preço médio litro interno
+        # Normalizar datas antes do merge para evitar problemas
+        entradas["DATA"] = pd.to_datetime(entradas["DATA"], dayfirst=True, errors="coerce").dt.normalize()
+        if "EMISSAO" in df_comb.columns:
+            df_comb["EMISSAO"] = df_comb["EMISSAO"].dt.normalize()
+
         entradas = entradas.merge(df_comb, left_on="DATA", right_on="EMISSAO", how="left")
         entradas["CUSTO TOTAL"] = entradas["CUSTO TOTAL"].apply(para_float)
 
         valor_total_entrada = entradas["CUSTO TOTAL"].sum()
         litros_entrada = entradas["QUANTIDADE DE LITROS"].sum()
-        preco_medio_litro = valor_total_entrada / litros_entrada if litros_entrada else 0
+
+        # Se litros_entrada == 0, evitar preço médio = 0, melhor usar None para indicar sem dados
+        preco_medio_litro = (valor_total_entrada / litros_entrada) if litros_entrada > 0 else None
 
         saidas = df_int_filt[df_int_filt["TIPO"] == "SAÍDA DE DIESEL"].copy()
         saidas["QUANTIDADE DE LITROS"] = saidas["QUANTIDADE DE LITROS"].apply(para_float)
-        saidas["CUSTO TOTAL"] = saidas["QUANTIDADE DE LITROS"] * preco_medio_litro
+        if preco_medio_litro is not None:
+            saidas["CUSTO TOTAL"] = saidas["QUANTIDADE DE LITROS"] * preco_medio_litro
+        else:
+            saidas["CUSTO TOTAL"] = None
 
         df_ext_copy = df_ext_filt.copy()
         df_ext_copy["DATA"] = pd.to_datetime(df_ext_copy["DATA"], dayfirst=True, errors="coerce")
         df_ext_copy["POSTO"] = df_ext_copy["POSTO"].fillna("Externo")
         df_ext_copy["LITROS"] = df_ext_copy["CONSUMO"].apply(para_float)
-        df_ext_copy["KM RODADOS"] = df_ext_copy["KM RODADOS"].apply(para_float) if "KM RODADOS" in df_ext_copy.columns else None
+        if "KM RODADOS" in df_ext_copy.columns:
+            df_ext_copy["KM RODADOS"] = df_ext_copy["KM RODADOS"].apply(para_float)
+        else:
+            df_ext_copy["KM RODADOS"] = None
 
         saidas["DATA"] = pd.to_datetime(saidas["DATA"], dayfirst=True, errors="coerce")
         saidas["POSTO"] = "Interno"
@@ -176,11 +203,21 @@ if uploaded_comb and uploaded_ext and uploaded_int:
         df_all = pd.concat([df_ext_copy, saidas], ignore_index=True)
 
         st.sidebar.markdown("### 🗓️ Filtro por Data")
-        min_data = df_all["DATA"].min()
-        max_data = df_all["DATA"].max()
-        data_inicio = st.sidebar.date_input("Data Inicial", min_data)
-        data_fim = st.sidebar.date_input("Data Final", max_data)
-        df_all = df_all[(df_all["DATA"] >= pd.to_datetime(data_inicio)) & (df_all["DATA"] <= pd.to_datetime(data_fim))]
+        # Verificar datas válidas para filtros
+        if not df_all["DATA"].dropna().empty:
+            min_data = df_all["DATA"].min().date()
+            max_data = df_all["DATA"].max().date()
+        else:
+            min_data = pd.to_datetime("2000-01-01").date()
+            max_data = pd.to_datetime("today").date()
+
+        data_inicio = st.sidebar.date_input("Data Inicial", min_data, min_value=min_data, max_value=max_data)
+        data_fim = st.sidebar.date_input("Data Final", max_data, min_value=min_data, max_value=max_data)
+
+        if data_inicio > data_fim:
+            st.sidebar.error("A data inicial não pode ser maior que a data final.")
+        else:
+            df_all = df_all[(df_all["DATA"] >= pd.to_datetime(data_inicio)) & (df_all["DATA"] <= pd.to_datetime(data_fim))]
 
         abas = st.tabs(["📊 Indicadores", "📈 Gráficos & Rankings", "🧾 Financeiro"])
 
@@ -215,44 +252,61 @@ if uploaded_comb and uploaded_ext and uploaded_int:
 
         with abas[1]:
             st.markdown("## 📈 Abastecimento por Placa (Litros)")
-            graf_placa = df_all.groupby("PLACA")["LITROS"].sum().reset_index().sort_values("LITROS", ascending=False)
-            fig = px.bar(graf_placa, x="PLACA", y="LITROS", color="PLACA", text_auto=True)
-            st.plotly_chart(fig, use_container_width=True)
+            if not df_all.empty:
+                graf_placa = df_all.groupby("PLACA")["LITROS"].sum().reset_index().sort_values("LITROS", ascending=False)
+                fig = px.bar(graf_placa, x="PLACA", y="LITROS", color="PLACA", text_auto=True)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Sem dados para exibir o gráfico por placa.")
 
             st.markdown("## 📆 Tendência de Abastecimento por Data")
-            graf_tempo = df_all.groupby(["DATA", "POSTO"])["LITROS"].sum().reset_index()
-            fig2 = px.line(graf_tempo, x="DATA", y="LITROS", color="POSTO", markers=True)
-            st.plotly_chart(fig2, use_container_width=True)
+            if not df_all.empty:
+                graf_tempo = df_all.groupby(["DATA", "POSTO"])["LITROS"].sum().reset_index()
+                fig2 = px.line(graf_tempo, x="DATA", y="LITROS", color="POSTO", markers=True)
+                st.plotly_chart(fig2, use_container_width=True)
+            else:
+                st.info("Sem dados para exibir a tendência por data.")
 
             st.markdown("## ⚙️ Eficiência (km/l) por Fonte")
-            fig_eff = px.bar(df_eff_final, x="PLACA", y="KM/LITRO", color="CLASSIFICAÇÃO", text_auto=".2f",
-                             title="Eficiência média por veículo")
-            fig_eff.update_layout(yaxis_title="Km por Litro (média)")
-            st.plotly_chart(fig_eff, use_container_width=True)
+            if not df_eff_final.empty:
+                fig_eff = px.bar(df_eff_final, x="PLACA", y="KM/LITRO", color="CLASSIFICAÇÃO", text_auto=".2f",
+                                 title="Eficiência média por veículo")
+                fig_eff.update_layout(yaxis_title="Km por Litro (média)")
+                st.plotly_chart(fig_eff, use_container_width=True)
+            else:
+                st.info("Sem dados de eficiência para exibir.")
 
             st.markdown("## 🏅 Ranking de Veículos por Consumo Total (Litros)")
-            ranking = df_all.groupby("PLACA")["LITROS"].sum().reset_index().sort_values("LITROS", ascending=False)
-            st.dataframe(ranking, use_container_width=True)
+            if not df_all.empty:
+                ranking = df_all.groupby("PLACA")["LITROS"].sum().reset_index().sort_values("LITROS", ascending=False)
+                st.dataframe(ranking, use_container_width=True)
+            else:
+                st.info("Sem dados para exibir ranking.")
 
             st.markdown("## ⚖️ Comparativo: Interno x Externo")
-            comparativo = df_all.groupby("POSTO").agg(
-                LITROS=("LITROS", "sum"),
-                **{"CUSTO TOTAL": ("CUSTO TOTAL", "sum")}
-            ).reset_index()
+            if not df_all.empty:
+                comparativo = df_all.groupby("POSTO").agg(
+                    LITROS=("LITROS", "sum"),
+                    **{"CUSTO TOTAL": ("CUSTO TOTAL", "sum")}
+                ).reset_index()
 
-            col1, col2 = st.columns(2)
-            with col1:
-                fig3 = px.pie(comparativo, values="LITROS", names="POSTO", title="Volume Abastecido")
-                st.plotly_chart(fig3, use_container_width=True)
-            with col2:
-                fig4 = px.pie(comparativo, values="CUSTO TOTAL", names="POSTO", title="Custo Total")
-                st.plotly_chart(fig4, use_container_width=True)
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig3 = px.pie(comparativo, values="LITROS", names="POSTO", title="Volume Abastecido")
+                    st.plotly_chart(fig3, use_container_width=True)
+                with col2:
+                    fig4 = px.pie(comparativo, values="CUSTO TOTAL", names="POSTO", title="Custo Total")
+                    st.plotly_chart(fig4, use_container_width=True)
+            else:
+                st.info("Sem dados para exibir comparativo interno x externo.")
 
         with abas[2]:
             st.markdown("## 🧾 Faturas de Combustível (Financeiro)")
             if "PAGAMENTO" in df_comb.columns:
                 df_comb["PAGAMENTO"] = pd.to_datetime(df_comb["PAGAMENTO"], dayfirst=True, errors="coerce")
-            st.dataframe(df_comb, use_container_width=True)
+                st.dataframe(df_comb.sort_values("EMISSAO", ascending=False), use_container_width=True)
+            else:
+                st.info("Arquivo Combustível não possui a coluna 'PAGAMENTO' para exibir.")
 
 else:
-    st.warning("⬅️ Envie os 3 arquivos `.csv` na barra lateral para visualizar o dashboard.")
+    st.info("📥 Por favor, envie os três arquivos CSV nas opções da barra lateral para iniciar a análise.")
