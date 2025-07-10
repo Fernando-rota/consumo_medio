@@ -2,79 +2,91 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+# --- Streamlit Page Configuration ---
 st.set_page_config(page_title="Dashboard de Abastecimento", layout="wide")
 st.title("⛽ Dashboard de Abastecimento de Veículos")
 
 # --- Helper Functions ---
+
 def padroniza_colunas(df):
+    """Standardizes DataFrame column names by stripping whitespace and converting to uppercase."""
     df.columns = df.columns.str.strip().str.upper()
     return df
 
 def para_float(valor):
+    """Converts a value to float, handling various string formats (comma as decimal, R$, spaces) and NaNs."""
     if pd.isna(valor):
         return None
     valor_str = str(valor).replace(",", ".").replace("R$", "").replace(" ", "").strip()
     try:
         return float(valor_str)
-    except:
+    except ValueError: # Catch specific ValueError for conversion issues
         return None
 
-# --- Data Loading and Preprocessing ---
-@st.cache_data # Cache data to avoid reloading on every interaction
+@st.cache_data # Cache data loading to improve performance on subsequent runs
 def load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int):
-    df_comb = None
-    df_ext = None
-    df_int = None
+    """
+    Loads, preprocesses, and validates the uploaded CSV files.
+
+    Args:
+        uploaded_comb: Uploaded file object for financial data.
+        uploaded_ext: Uploaded file object for external fueling data.
+        uploaded_int: Uploaded file object for internal fueling data.
+
+    Returns:
+        tuple: (df_comb, df_ext, df_int, placas_validas, combustiveis) or (None, None, None, None, None) if errors occur.
+    """
+    df_comb, df_ext, df_int = None, None, None
     errors = []
 
+    # --- Load DataFrames with error handling ---
     try:
         df_comb = padroniza_colunas(pd.read_csv(uploaded_comb, sep=";", encoding="utf-8"))
     except Exception as e:
-        errors.append(f"Erro ao carregar arquivo de Combustível (Financeiro): {e}")
+        errors.append(f"Erro ao carregar arquivo 'Combustível (Financeiro)': {e}")
 
     try:
         df_ext = padroniza_colunas(pd.read_csv(uploaded_ext, sep=";", encoding="utf-8"))
     except Exception as e:
-        errors.append(f"Erro ao carregar arquivo de Abastecimento Externo: {e}")
+        errors.append(f"Erro ao carregar arquivo 'Abastecimento Externo': {e}")
 
     try:
         df_int = padroniza_colunas(pd.read_csv(uploaded_int, sep=";", encoding="utf-8"))
     except Exception as e:
-        errors.append(f"Erro ao carregar arquivo de Abastecimento Interno: {e}")
+        errors.append(f"Erro ao carregar arquivo 'Abastecimento Interno': {e}")
 
     if errors:
         for error in errors:
             st.error(f"❌ {error}")
-        return None, None, None, None
+        return None, None, None, None, None # Return None for all if any file fails to load
 
-    # Column validation
-    colunas_necessarias_ext = {"PLACA", "CONSUMO", "CUSTO TOTAL", "DATA"}
-    colunas_necessarias_int = {"PLACA", "QUANTIDADE DE LITROS", "DATA"}
-    # The image shows 'KM FINAL' which might be the actual odometer reading.
-    # If 'KM RODADOS' is a calculated difference, it's fine. If not, needs re-calculation.
-    # Assuming 'KM RODADOS' exists and is the actual distance for now.
+    # --- Validate Required Columns ---
+    # These are the minimum columns expected for the dashboard's core functionality
+    required_cols_ext = {"PLACA", "CONSUMO", "CUSTO TOTAL", "DATA"}
+    required_cols_int = {"PLACA", "QUANTIDADE DE LITROS", "DATA"}
 
-    faltando_ext = colunas_necessarias_ext - set(df_ext.columns)
-    faltando_int = colunas_necessarias_int - set(df_int.columns)
+    missing_ext = required_cols_ext - set(df_ext.columns)
+    missing_int = required_cols_int - set(df_int.columns)
 
-    if faltando_ext:
-        st.error(f"❌ Abastecimento Externo está faltando colunas: {faltando_ext}. Por favor, verifique se as colunas estão corretas no CSV.")
-        return None, None, None, None
-    if faltando_int:
-        st.error(f"❌ Abastecimento Interno está faltando colunas: {faltando_int}. Por favor, verifique se as colunas estão corretas no CSV.")
-        return None, None, None, None
+    if missing_ext:
+        st.error(f"❌ O arquivo 'Abastecimento Externo' está faltando colunas essenciais: {', '.join(missing_ext)}. Por favor, verifique o cabeçalho do CSV.")
+        return None, None, None, None, None
+    if missing_int:
+        st.error(f"❌ O arquivo 'Abastecimento Interno' está faltando colunas essenciais: {', '.join(missing_int)}. Por favor, verifique o cabeçalho do CSV.")
+        return None, None, None, None, None
 
-    # Data Type Conversions and Cleaning
+    # --- Data Type Conversions and Cleaning ---
     df_ext["PLACA"] = df_ext["PLACA"].astype(str).str.upper().str.strip().str.replace(" ", "")
     df_int["PLACA"] = df_int["PLACA"].astype(str).str.upper().str.strip().str.replace(" ", "")
 
+    # Convert 'DATA' columns to datetime, coercing errors to NaT (Not a Time)
     df_ext["DATA"] = pd.to_datetime(df_ext["DATA"], dayfirst=True, errors="coerce")
     df_int["DATA"] = pd.to_datetime(df_int["DATA"], dayfirst=True, errors="coerce")
 
-    # Apply para_float early for numerical columns that will be used in calculations
+    # Apply para_float to numerical columns, including optional ones using .get()
     df_ext["CONSUMO"] = df_ext["CONSUMO"].apply(para_float)
     df_ext["CUSTO TOTAL"] = df_ext["CUSTO TOTAL"].apply(para_float)
-    df_ext["KM RODADOS"] = df_ext.get("KM RODADOS", pd.Series([None]*len(df_ext))).apply(para_float) # .get handles missing col
+    df_ext["KM RODADOS"] = df_ext.get("KM RODADOS", pd.Series([None]*len(df_ext))).apply(para_float) # Handles if column is missing
     df_ext["KM/LITRO"] = df_ext.get("KM/LITRO", pd.Series([None]*len(df_ext))).apply(para_float)
 
     df_int["QUANTIDADE DE LITROS"] = df_int["QUANTIDADE DE LITROS"].apply(para_float)
@@ -85,8 +97,8 @@ def load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int):
     if "VENCIMENTO" in df_comb.columns:
         df_comb["VENCIMENTO"] = pd.to_datetime(df_comb["VENCIMENTO"], dayfirst=True, errors="coerce")
 
-    # Determine unique valid plates and fuels
-    placas_validas = sorted(set(df_ext["PLACA"]).union(df_int["PLACA"]) - {"-", "CORREÇÃO", "NAN"})
+    # Determine unique valid plates and fuel types for filters
+    placas_validas = sorted(set(df_ext["PLACA"]).union(df_int["PLACA"]) - {"-", "CORREÇÃO", "NAN", "", "NONE"})
     combustiveis = []
     if "DESCRIÇÃO DO ABASTECIMENTO" in df_ext.columns:
         combustiveis = df_ext["DESCRIÇÃO DO ABASTECIMENTO"].dropna().unique()
@@ -94,193 +106,267 @@ def load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int):
 
     return df_comb, df_ext, df_int, placas_validas, combustiveis
 
-# --- KPI Calculation Function ---
-def calculate_kpis(df_ext_filt, df_int_filt, df_comb_filt):
+def calculate_kpis_and_combine_data(df_ext_filtered, df_int_filtered):
+    """
+    Calculates key performance indicators and combines external and internal fueling data.
+
+    Args:
+        df_ext_filtered (pd.DataFrame): Filtered external fueling data.
+        df_int_filtered (pd.DataFrame): Filtered internal fueling data.
+
+    Returns:
+        tuple: (consumo_ext, custo_ext, consumo_int, custo_int_estimated, df_all, df_efficiency, avg_price_per_liter_ext)
+    """
     # Calculate external consumption and cost
-    consumo_ext = df_ext_filt["CONSUMO"].sum()
-    custo_ext = df_ext_filt["CUSTO TOTAL"].sum()
+    consumo_ext = df_ext_filtered["CONSUMO"].sum()
+    custo_ext = df_ext_filtered["CUSTO TOTAL"].sum()
 
     # Calculate internal consumption
-    consumo_int = df_int_filt["QUANTIDADE DE LITROS"].sum()
+    consumo_int = df_int_filtered["QUANTIDADE DE LITROS"].sum()
 
-    # --- Internal Fueling Cost (Improved Calculation) ---
-    # Option 2: Approximate internal cost based on average external price
-    # Get average price per liter from external fueling if available
+    # --- Internal Fueling Cost (Estimated) ---
+    # Estimate internal cost based on the average price per liter from external fueling.
+    # This assumes external prices are a reasonable proxy for internal fuel cost.
     avg_price_per_liter_ext = 0
-    valid_ext_for_price = df_ext_filt.dropna(subset=["CUSTO TOTAL", "CONSUMO"])
+    valid_ext_for_price = df_ext_filtered.dropna(subset=["CUSTO TOTAL", "CONSUMO"])
+    # Ensure no division by zero and there's actual consumption data
     if not valid_ext_for_price.empty and valid_ext_for_price["CONSUMO"].sum() > 0:
         avg_price_per_liter_ext = valid_ext_for_price["CUSTO TOTAL"].sum() / valid_ext_for_price["CONSUMO"].sum()
 
-    custo_int = 0
+    custo_int_estimated = 0
     if avg_price_per_liter_ext > 0 and consumo_int > 0:
-        custo_int = consumo_int * avg_price_per_liter_ext
-    # Else, if no external data to base price on, custo_int remains 0 or can be None
+        custo_int_estimated = consumo_int * avg_price_per_liter_ext
 
-    # Create combined dataframe for general analysis and charting
-    df_ext_processed = df_ext_filt.copy()
+    # --- Prepare DataFrames for Concatenation ---
+    df_ext_processed = df_ext_filtered.copy()
     df_ext_processed["FONTE"] = "Externo"
     df_ext_processed["LITROS"] = df_ext_processed["CONSUMO"]
     df_ext_processed["CUSTO"] = df_ext_processed["CUSTO TOTAL"]
 
-    df_int_processed = df_int_filt.copy()
+    df_int_processed = df_int_filtered.copy()
     df_int_processed["FONTE"] = "Interno"
     df_int_processed["LITROS"] = df_int_processed["QUANTIDADE DE LITROS"]
-    df_int_processed["CUSTO"] = df_int_processed["LITROS"] * avg_price_per_liter_ext # Use calculated internal cost
+    # Assign estimated cost for internal fueling
+    df_int_processed["CUSTO"] = df_int_processed["LITROS"] * avg_price_per_liter_ext
 
-    # Select common columns for concatenation
+    # Define common columns to ensure consistent structure before concatenation
+    # Add KM RODADOS and KM/LITRO if they exist in the external data
     common_cols = ["DATA", "PLACA", "LITROS", "CUSTO", "FONTE"]
-    if "KM RODADOS" in df_ext_processed.columns: # Add KM RODADOS for external data if available
+    if "KM RODADOS" in df_ext_processed.columns:
         common_cols.append("KM RODADOS")
-    if "KM/LITRO" in df_ext_processed.columns: # Add KM/LITRO for external data if available
+    if "KM/LITRO" in df_ext_processed.columns:
         common_cols.append("KM/LITRO")
 
-    # Ensure all columns are present in both DFs before concat, fill with None if not
+    # Ensure all common columns are present in both DFs before concat, fill with None if not
     for col in common_cols:
         if col not in df_ext_processed.columns:
-            df_ext_processed[col] = None
+            df_ext_processed[col] = pd.Series([None] * len(df_ext_processed))
         if col not in df_int_processed.columns:
-            df_int_processed[col] = None
+            df_int_processed[col] = pd.Series([None] * len(df_int_processed))
 
+    # Concatenate data for combined analysis
     df_all = pd.concat([
         df_ext_processed[common_cols],
         df_int_processed[common_cols]
     ], ignore_index=True)
 
-    # Calculate KM/L for external fueling (if 'KM RODADOS' is the actual distance driven)
-    df_eff = df_ext_processed.dropna(subset=["KM RODADOS", "LITROS"]).copy()
-    if not df_eff.empty:
-        df_eff["KM/LITRO CALC"] = df_eff["KM RODADOS"] / df_eff["LITROS"]
+    # Calculate KM/L for external fueling.
+    # Assuming 'KM RODADOS' is the actual distance driven since the last fill-up.
+    # If it's an odometer reading, a more complex calculation (difference between consecutive readings)
+    # would be needed, requiring sorting by plate and date, and handling first entries.
+    df_efficiency = df_ext_processed.dropna(subset=["KM RODADOS", "LITROS"]).copy()
+    if not df_efficiency.empty:
+        # Avoid division by zero for KM/L calculation
+        df_efficiency = df_efficiency[df_efficiency["LITROS"] > 0]
+        if not df_efficiency.empty:
+            df_efficiency["KM/LITRO CALC"] = df_efficiency["KM RODADOS"] / df_efficiency["LITROS"]
+        else:
+            df_efficiency["KM/LITRO CALC"] = None # No valid data after filtering zero liters
     else:
-        df_eff["KM/LITRO CALC"] = None # Ensure column exists even if empty
+        df_efficiency["KM/LITRO CALC"] = None # Ensure column exists even if empty
 
-    return consumo_ext, custo_ext, consumo_int, custo_int, df_all, df_eff, avg_price_per_liter_ext
+    return consumo_ext, custo_ext, consumo_int, custo_int_estimated, df_all, df_efficiency, avg_price_per_liter_ext
 
-# --- Streamlit UI ---
+# --- Streamlit Sidebar: File Uploads ---
+st.sidebar.header("📁 Enviar arquivos .csv")
 uploaded_comb = st.sidebar.file_uploader("📄 Combustível (Financeiro)", type="csv")
 uploaded_ext = st.sidebar.file_uploader("⛽ Abastecimento Externo", type="csv")
 uploaded_int = st.sidebar.file_uploader("🛢️ Abastecimento Interno", type="csv")
 
+# --- Main Dashboard Logic ---
 if uploaded_comb and uploaded_ext and uploaded_int:
+    # Load and preprocess data
     df_comb, df_ext, df_int, placas_validas, combustiveis = load_and_preprocess_data(uploaded_comb, uploaded_ext, uploaded_int)
 
-    if df_comb is not None: # Check if data loading was successful
-        col1, col2 = st.columns(2)
-        with col1:
+    if df_comb is not None: # Proceed only if all files were loaded and validated successfully
+        # --- Filters Section ---
+        st.sidebar.markdown("---")
+        st.sidebar.header("⚙️ Filtros")
+
+        # Placa and Fuel Type Filters
+        col1_filter, col2_filter = st.columns(2)
+        with col1_filter:
             placa_selecionada = st.selectbox("🔎 Filtrar por Placa", ["Todas"] + placas_validas)
-        with col2:
+        with col2_filter:
+            # Note: Fuel type filter primarily applies to external fueling data as internal data often lacks this detail
             tipo_comb = st.selectbox("⛽ Tipo de Combustível (Apenas Externo)", ["Todos"] + combustiveis)
 
-        # Date Filter - Added for more control
+        # Date Range Filter (applies to both external and internal fueling data)
         st.sidebar.subheader("📅 Filtrar por Período")
-        min_date = df_all['DATA'].min() if not df_all.empty else None
-        max_date = df_all['DATA'].max() if not df_all.empty else None
 
-        if min_date and max_date:
-            date_range = st.sidebar.date_input(
+        # Determine the overall min/max dates from the initially loaded (raw) dataframes
+        # This ensures the date picker always shows the full range available in the dataset,
+        # even if specific filters (like plate) result in an empty subset.
+        all_dates_series = pd.Series(dtype='datetime64[ns]')
+        if df_ext is not None and 'DATA' in df_ext.columns:
+            all_dates_series = pd.concat([all_dates_series, df_ext['DATA'].dropna()])
+        if df_int is not None and 'DATA' in df_int.columns:
+            all_dates_series = pd.concat([all_dates_series, df_int['DATA'].dropna()])
+
+        global_min_date = all_dates_series.min() if not all_dates_series.empty else None
+        global_max_date = all_dates_series.max() if not all_dates_series.empty else None
+
+        start_date_filter, end_date_filter = None, None
+
+        if global_min_date and global_max_date:
+            date_range_selection = st.sidebar.date_input(
                 "Selecione o intervalo de datas",
-                value=(min_date, max_date),
-                min_value=min_date,
-                max_value=max_date
+                value=(global_min_date, global_max_date), # Default to the full date range
+                min_value=global_min_date,
+                max_value=global_max_date
             )
-            if len(date_range) == 2:
-                start_date, end_date = date_range
-                # Apply date filter to original dataframes before specific filters
-                df_ext_filtered_by_date = df_ext[(df_ext["DATA"] >= pd.Timestamp(start_date)) & (df_ext["DATA"] <= pd.Timestamp(end_date))]
-                df_int_filtered_by_date = df_int[(df_int["DATA"] >= pd.Timestamp(start_date)) & (df_int["DATA"] <= pd.Timestamp(end_date))]
-            else: # Handle case where only one date is selected (e.g., initial state)
+            if len(date_range_selection) == 2:
+                start_date_filter, end_date_filter = date_range_selection
+            elif len(date_range_selection) == 1:
                 st.sidebar.info("Selecione um intervalo de duas datas para aplicar o filtro.")
-                df_ext_filtered_by_date = df_ext
-                df_int_filtered_by_date = df_int
+                # If only one date is selected, don't apply date filter yet
+                start_date_filter, end_date_filter = global_min_date, global_max_date # Use full range
         else:
-            df_ext_filtered_by_date = df_ext
-            df_int_filtered_by_date = df_int
-            st.sidebar.info("Dados de data insuficientes para o filtro de período.")
+            st.sidebar.info("Não há dados de data válidos para o filtro de período.")
+            # If no valid dates, set to full original dataframes
+            start_date_filter, end_date_filter = None, None # Indicate no date filter to be applied
+
+        # --- Apply Filters in Order: Date -> Placa -> Combustível ---
+        df_ext_filtered_by_date = df_ext.copy()
+        df_int_filtered_by_date = df_int.copy()
+
+        if start_date_filter and end_date_filter:
+            # Filter by date, handling potential NaT values
+            df_ext_filtered_by_date = df_ext_filtered_by_date[
+                (df_ext_filtered_by_date['DATA'].notna()) &
+                (df_ext_filtered_by_date["DATA"] >= pd.Timestamp(start_date_filter)) &
+                (df_ext_filtered_by_date["DATA"] <= pd.Timestamp(end_date_filter))
+            ]
+            df_int_filtered_by_date = df_int_filtered_by_date[
+                (df_int_filtered_by_date['DATA'].notna()) &
+                (df_int_filtered_by_date["DATA"] >= pd.Timestamp(start_date_filter)) &
+                (df_int_filtered_by_date["DATA"] <= pd.Timestamp(end_date_filter))
+            ]
 
 
-        # Apply Placa and Tipo Combustível filters
-        df_ext_filt = df_ext_filtered_by_date[df_ext_filtered_by_date["PLACA"] == placa_selecionada] if placa_selecionada != "Todas" else df_ext_filtered_by_date
-        df_int_filt = df_int_filtered_by_date[df_int_filtered_by_date["PLACA"] == placa_selecionada] if placa_selecionada != "Todas" else df_int_filtered_by_date
+        # Apply Placa filter
+        df_ext_final_filtered = df_ext_filtered_by_date[df_ext_filtered_by_date["PLACA"] == placa_selecionada] if placa_selecionada != "Todas" else df_ext_filtered_by_date
+        df_int_final_filtered = df_int_filtered_by_date[df_int_filtered_by_date["PLACA"] == placa_selecionada] if placa_selecionada != "Todas" else df_int_filtered_by_date
 
-        if tipo_comb != "Todos" and "DESCRIÇÃO DO ABASTECIMENTO" in df_ext_filt.columns:
-            df_ext_filt = df_ext_filt[df_ext_filt["DESCRIÇÃO DO ABASTECIMENTO"] == tipo_comb]
-            # Note: Internal fueling typically doesn't have a fuel type column in this setup.
+        # Apply Tipo de Combustível filter (only for external data)
+        if tipo_comb != "Todos" and "DESCRIÇÃO DO ABASTECIMENTO" in df_ext_final_filtered.columns:
+            df_ext_final_filtered = df_ext_final_filtered[df_ext_final_filtered["DESCRIÇÃO DO ABASTECIMENTO"] == tipo_comb]
 
-        # Check if filtered data is empty
-        if df_ext_filt.empty and df_int_filt.empty:
-            st.warning("Não há dados para os filtros selecionados. Tente ajustar os filtros.")
+        # Check if filtered data is empty before calculating KPIs and generating plots
+        if df_ext_final_filtered.empty and df_int_final_filtered.empty:
+            st.warning("Não há dados para os filtros selecionados. Por favor, ajuste as opções de filtro.")
         else:
-            consumo_ext, custo_ext, consumo_int, custo_int, df_all, df_eff, avg_price_per_liter_ext = calculate_kpis(df_ext_filt, df_int_filt, df_comb)
+            # Calculate KPIs and prepare combined DataFrame
+            consumo_ext, custo_ext, consumo_int, custo_int_estimated, df_all, df_efficiency, avg_price_per_liter_ext = \
+                calculate_kpis_and_combine_data(df_ext_final_filtered, df_int_final_filtered)
 
+            # --- Dashboard Tabs ---
             abas = st.tabs(["📊 Indicadores", "📈 Gráficos & Rankings", "🧾 Financeiro"])
 
-            with abas[0]:
+            with abas[0]: # Indicadores Tab
                 st.markdown("## 📊 Indicadores Resumidos")
-                col1, col2, col3, col4 = st.columns(4)
+                col1_metric, col2_metric, col3_metric, col4_metric = st.columns(4)
 
-                col1.metric("Total Externo (L)", f"{consumo_ext:.1f}")
-                col2.metric("Total Interno (L)", f"{consumo_int:.1f}")
-                col3.metric("Custo Total Externo", f"R$ {custo_ext:,.2f}")
-                col4.metric("Custo Total Interno (Estimado)", f"R$ {custo_int:,.2f}")
-                st.info(f"O custo total interno é uma estimativa baseada no preço médio por litro do abastecimento externo (R$ {avg_price_per_liter_ext:,.2f}/L).")
+                col1_metric.metric("Total Externo (L)", f"{consumo_ext:,.1f}")
+                col2_metric.metric("Total Interno (L)", f"{consumo_int:,.1f}")
+                col3_metric.metric("Custo Total Externo", f"R$ {custo_ext:,.2f}")
+                col4_metric.metric("Custo Total Interno (Estimado)", f"R$ {custo_int_estimated:,.2f}")
+
+                if avg_price_per_liter_ext > 0:
+                    st.info(f"💡 O custo total interno é uma estimativa baseada no preço médio por litro do abastecimento externo (R$ {avg_price_per_liter_ext:,.2f}/L).")
+                else:
+                    st.warning("Não foi possível estimar o custo interno, pois não há dados de custo válidos para abastecimento externo.")
 
 
-            with abas[1]:
+            with abas[1]: # Gráficos & Rankings Tab
                 st.markdown("## 📈 Abastecimento por Placa")
-                if not df_all.empty:
+                if not df_all.empty and 'LITROS' in df_all.columns:
                     graf_placa = df_all.groupby("PLACA")["LITROS"].sum().reset_index().sort_values("LITROS", ascending=False)
-                    fig = px.bar(graf_placa, x="PLACA", y="LITROS", color="PLACA", text_auto=True, title="Volume Abastecido por Placa")
-                    st.plotly_chart(fig, use_container_width=True)
+                    fig_placa = px.bar(graf_placa, x="PLACA", y="LITROS", color="PLACA", text_auto=True,
+                                       title="Volume de Combustível Abastecido por Placa")
+                    st.plotly_chart(fig_placa, use_container_width=True)
                 else:
-                    st.info("Não há dados para o gráfico de Abastecimento por Placa.")
+                    st.info("Não há dados para exibir o gráfico de Abastecimento por Placa com os filtros selecionados.")
 
-
+                st.markdown("---")
                 st.markdown("## 📆 Tendência por Data")
-                if not df_all.empty:
-                    graf_tempo = df_all.groupby(["DATA", "FONTE"])["LITROS"].sum().reset_index()
-                    fig2 = px.line(graf_tempo, x="DATA", y="LITROS", color="FONTE", markers=True, title="Volume de Abastecimento ao Longo do Tempo")
-                    st.plotly_chart(fig2, use_container_width=True)
+                if not df_all.empty and 'DATA' in df_all.columns and 'FONTE' in df_all.columns:
+                    # Drop rows where 'DATA' might be NaT after conversion/filtering for plotting
+                    graf_tempo = df_all.dropna(subset=['DATA']).groupby(["DATA", "FONTE"])["LITROS"].sum().reset_index()
+                    if not graf_tempo.empty:
+                        fig_tempo = px.line(graf_tempo, x="DATA", y="LITROS", color="FONTE", markers=True,
+                                            title="Volume de Abastecimento ao Longo do Tempo (Interno vs. Externo)")
+                        st.plotly_chart(fig_tempo, use_container_width=True)
+                    else:
+                        st.info("Não há dados válidos com data para exibir a Tendência por Data.")
                 else:
-                    st.info("Não há dados para o gráfico de Tendência por Data.")
+                    st.info("Não há dados para exibir o gráfico de Tendência por Data com os filtros selecionados.")
 
-
-                st.markdown("## ⚙️ Eficiência (km/l) - Externo")
-                if not df_eff.empty and "KM/LITRO CALC" in df_eff.columns and df_eff["KM/LITRO CALC"].sum() > 0:
-                    df_eff_media = df_eff.groupby("PLACA")["KM/LITRO CALC"].mean().reset_index().sort_values("KM/LITRO CALC", ascending=False)
-                    fig_eff = px.bar(df_eff_media, x="PLACA", y="KM/LITRO CALC", text_auto=".2f", color="PLACA", title="Média de KM por Litro (Abastecimento Externo)")
+                st.markdown("---")
+                st.markdown("## ⚙️ Eficiência (km/l) - Abastecimento Externo")
+                if not df_efficiency.empty and "KM/LITRO CALC" in df_efficiency.columns and df_efficiency["KM/LITRO CALC"].sum() > 0:
+                    df_eff_media = df_efficiency.groupby("PLACA")["KM/LITRO CALC"].mean().reset_index().sort_values("KM/LITRO CALC", ascending=False)
+                    fig_eff = px.bar(df_eff_media, x="PLACA", y="KM/LITRO CALC", text_auto=".2f", color="PLACA",
+                                     title="Média de KM por Litro (Abastecimento Externo)")
                     fig_eff.update_layout(yaxis_title="KM por Litro (média)")
                     st.plotly_chart(fig_eff, use_container_width=True)
                 else:
-                    st.info("Não há dados suficientes para calcular eficiência (km/l) para o abastecimento externo ou 'KM RODADOS' está ausente/vazio. Verifique a coluna 'KM RODADOS' no arquivo de Abastecimento Externo. Se ela for a leitura do odômetro, a lógica de cálculo precisa ser ajustada para diferenças entre abastecimentos.")
+                    st.info("Não há dados suficientes ou válidos para calcular a eficiência (km/l) para o abastecimento externo com os filtros selecionados. Certifique-se de que as colunas 'KM RODADOS' e 'CONSUMO' estejam preenchidas no arquivo de Abastecimento Externo.")
 
+                st.markdown("---")
                 st.markdown("## 🏅 Ranking de Veículos por Consumo Total")
-                if not df_all.empty:
+                if not df_all.empty and 'LITROS' in df_all.columns:
                     ranking = df_all.groupby("PLACA")["LITROS"].sum().reset_index().sort_values("LITROS", ascending=False)
                     st.dataframe(ranking, use_container_width=True, hide_index=True)
                 else:
-                    st.info("Não há dados para o Ranking de Veículos.")
+                    st.info("Não há dados para exibir o Ranking de Veículos com os filtros selecionados.")
 
+                st.markdown("---")
                 st.markdown("## ⚖️ Comparativo: Interno x Externo")
-                if not df_all.empty:
+                if not df_all.empty and 'LITROS' in df_all.columns and 'CUSTO' in df_all.columns:
                     comparativo = df_all.groupby("FONTE").agg(
                         LITROS=("LITROS", "sum"),
                         CUSTO=("CUSTO", "sum")
                     ).reset_index()
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        fig3 = px.pie(comparativo, values="LITROS", names="FONTE", title="Volume Abastecido por Fonte")
-                        st.plotly_chart(fig3, use_container_width=True)
-                    with col2:
-                        fig4 = px.pie(comparativo, values="CUSTO", names="FONTE", title="Custo Total por Fonte (Custo Interno Estimado)")
-                        st.plotly_chart(fig4, use_container_width=True)
+                    col_pie1, col_pie2 = st.columns(2)
+                    with col_pie1:
+                        fig_vol = px.pie(comparativo, values="LITROS", names="FONTE", title="Volume Abastecido por Fonte")
+                        st.plotly_chart(fig_vol, use_container_width=True)
+                    with col_pie2:
+                        fig_cost = px.pie(comparativo, values="CUSTO", names="FONTE", title="Custo Total por Fonte (Custo Interno Estimado)")
+                        st.plotly_chart(fig_cost, use_container_width=True)
                 else:
-                    st.info("Não há dados para o Comparativo: Interno x Externo.")
+                    st.info("Não há dados para exibir o Comparativo: Interno x Externo com os filtros selecionados.")
 
-            with abas[2]:
+            with abas[2]: # Financeiro Tab
                 st.markdown("## 🧾 Faturas de Combustível (Financeiro)")
-                if not df_comb.empty:
+                if df_comb is not None and not df_comb.empty:
                     st.dataframe(df_comb, use_container_width=True, hide_index=True)
                 else:
-                    st.info("Não há dados na planilha financeira.")
+                    st.info("Não há dados na planilha financeira ou o arquivo não foi carregado corretamente.")
+
+    else:
+        st.error("Houve um problema ao carregar ou validar um dos arquivos. Por favor, verifique as mensagens de erro acima e tente novamente.")
 
 else:
-    st.warning("⬅️ Envie os 3 arquivos `.csv` na barra lateral para visualizar o dashboard.")
+    st.warning("⬅️ Por favor, envie os 3 arquivos `.csv` na barra lateral esquerda para visualizar o dashboard completo.")
