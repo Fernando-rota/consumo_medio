@@ -8,9 +8,9 @@ st.title("📊 Dashboard de Abastecimento - Interno e Externo")
 
 # Upload de arquivos
 st.sidebar.header("🔼 Enviar Planilhas")
-externo_file = st.sidebar.file_uploader("Abastecimento Externo (.xlsx)", type="xlsx")
-interno_file = st.sidebar.file_uploader("Abastecimento Interno (.xlsx)", type="xlsx")
-fornecedor_file = st.sidebar.file_uploader("Compras de Diesel (.xlsx)", type="xlsx")
+externo_file = st.sidebar.file_uploader("Abastecimento Externo (.csv)", type="csv")
+interno_file = st.sidebar.file_uploader("Abastecimento Interno (.csv)", type="csv")
+fornecedor_file = st.sidebar.file_uploader("Compras de Diesel (.csv)", type="csv")
 
 # Função de mapeamento inteligente de colunas
 def mapear_colunas(df, mapa):
@@ -26,11 +26,9 @@ def mapear_colunas(df, mapa):
 
 # Funções de validação e padronização de placa
 def validar_placa_tradicional(placa: str) -> bool:
-    # 3 letras + 4 números
     return bool(re.fullmatch(r'[A-Z]{3}[0-9]{4}', placa))
 
 def validar_placa_mercosul(placa: str) -> bool:
-    # 3 letras + 1 número + 1 letra + 2 números
     return bool(re.fullmatch(r'[A-Z]{3}[0-9][A-Z][0-9]{2}', placa))
 
 def padronizar_placa(placa: str) -> str:
@@ -44,10 +42,10 @@ def padronizar_placa(placa: str) -> str:
 
 if externo_file and interno_file and fornecedor_file:
     try:
-        # Leitura dos arquivos
-        externo = pd.read_excel(externo_file)
-        interno = pd.read_excel(interno_file)
-        fornecedor = pd.read_excel(fornecedor_file)
+        # Leitura dos arquivos CSV
+        externo = pd.read_csv(externo_file)
+        interno = pd.read_csv(interno_file)
+        fornecedor = pd.read_csv(fornecedor_file)
 
         # Mapeamento de colunas possíveis
         mapa_externo = {
