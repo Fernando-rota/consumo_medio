@@ -1,86 +1,72 @@
 import streamlit as st
 import pandas as pd
-import unicodedata
+import numpy as np
 
-# Funções auxiliares
-def remove_acentos(txt):
-    return ''.join(c for c in unicodedata.normalize('NFKD', txt) if not unicodedata.combining(c))
+# Configuração da página
+st.set_page_config(page_title="Dashboard de Abastecimento", layout="wide")
+st.title("📊 Dashboard de Abastecimento - Interno e Externo")
 
-def normaliza_colunas(df):
-    df.columns = [remove_acentos(col).lower().strip().replace(' ', '_') for col in df.columns]
-    return df
+# Upload dos arquivos
+st.sidebar.header("🔼 Enviar Planilhas")
+externo_file = st.sidebar.file_uploader("Abastecimento Externo (.xlsx)", type="xlsx")
+interno_file = st.sidebar.file_uploader("Abastecimento Interno (.xlsx)", type="xlsx")
+fornecedor_file = st.sidebar.file_uploader("Compras de Diesel (.xlsx)", type="xlsx")
 
-def normaliza_placa(placa):
-    if pd.isna(placa):
-        return ''
-    return ''.join(c for c in placa.upper().strip() if c.isalnum())
+# Processamento
+if externo_file and interno_file and fornecedor_file:
+    externo = pd.read_excel(externo_file)
+    interno = pd.read_excel(interno_file)
+    fornecedor = pd.read_excel(fornecedor_file)
 
-def verificar_colunas_obrigatorias(df, obrigatorias, nome_base):
-    faltando = [col for col in obrigatorias if col not in df.columns]
-    if faltando:
-        st.error(f"🛑 Colunas obrigatórias ausentes na base '{nome_base}': {faltando}")
-        st.warning(f"Colunas encontradas: {df.columns.tolist()}")
-        return False
-    return True
+    # --- EXTERNO ---
+    externo.columns = externo.columns.str.lower().str.strip()
+    externo = externo.rename(columns={
+        "km atual": "km_atual",
+        "consumo": "litros",
+        "valor pago": "valor_pago",
+        "placa": "placa"
+    })
+    externo["data"] = pd.to_datetime(externo["data"], errors="coerce")
+    externo = externo[~externo["placa"].isin(["-", "correção"])]
+    externo = externo.sort_values(by=["placa", "data"])
+    externo["km_rodado"] = externo.groupby("placa")["km_atual"].diff()
+    externo["km_litro"] = externo["km_rodado"] / externo["litros"]
 
-# Função principal de carregamento
-@st.cache_data
-def carregar_planilhas(arquivo_combustivel, arquivo_externo, arquivo_interno):
-    combustivel = pd.read_excel(arquivo_combustivel)
-    externo = pd.read_excel(arquivo_externo)
-    interno = pd.read_excel(arquivo_interno)
+    # --- INTERNO ---
+    interno.columns = interno.columns.str.lower().str.strip()
+    interno = interno[interno["tipo"].str.lower() == "saida"]
+    interno = interno[~interno["placa"].isin(["-", "correção"])]
+    interno["data"] = pd.to_datetime(interno["data"], errors="coerce")
+    interno = interno.rename(columns={"quantidade de litro": "litros"})
 
-    # Normaliza colunas
-    combustivel = normaliza_colunas(combustivel)
-    externo = normaliza_colunas(externo)
-    interno = normaliza_colunas(interno)
+    # --- FORNECEDOR ---
+    fornecedor.columns = fornecedor.columns.str.lower().str.strip()
+    fornecedor["emissão"] = pd.to_datetime(fornecedor["emissão"], errors="coerce")
+    total_pago = fornecedor["valor pago"].sum()
+    total_litros_internos = interno["litros"].sum()
+    preco_medio_interno = total_pago / total_litros_internos if total_litros_internos > 0 else np.nan
 
-    # Verifica colunas obrigatórias
-    ok1 = verificar_colunas_obrigatorias(combustivel, ['fornecedor', 'emissao'], 'Combustível')
-    ok2 = verificar_colunas_obrigatorias(externo, ['data', 'placa', 'posto', 'km_atual', 'descricao_do_abastecimento', 'consumo', 'custo_total'], 'Externo')
-    ok3 = verificar_colunas_obrigatorias(interno, ['data', 'tipo', 'placa', 'km_atual', 'quantidade_de_litros'], 'Interno')
+    preco_medio_externo = (externo["valor_pago"] / externo["litros"]).mean()
 
-    if not (ok1 and ok2 and ok3):
-        return None, None, None
+    # --- KPIs ---
+    st.markdown("### 🧾 Indicadores Gerais")
+    col1, col2 = st.columns(2)
+    col1.metric("💰 Preço Médio Diesel Interno", f"R$ {preco_medio_interno:.2f}")
+    col2.metric("⛽ Preço Médio Diesel Externo", f"R$ {preco_medio_externo:.2f}")
 
-    # Normaliza placas
-    externo['placa'] = externo['placa'].apply(normaliza_placa)
-    interno['placa'] = interno['placa'].apply(normaliza_placa)
+    # --- Eficiência ---
+    st.markdown("### ⚙️ Eficiência Média por Veículo (Externo)")
+    km_l_por_placa = externo.groupby("placa")["km_litro"].mean().sort_values(ascending=False)
+    st.bar_chart(km_l_por_placa)
 
-    # Converte datas
-    combustivel['emissao'] = pd.to_datetime(combustivel['emissao'], errors='coerce')
-    externo['data'] = pd.to_datetime(externo['data'], errors='coerce')
-    interno['data'] = pd.to_datetime(interno['data'], errors='coerce')
+    # --- Consumo total por veículo ---
+    st.markdown("### ⛽ Consumo Total por Veículo (Litros)")
+    consumo_por_placa = externo.groupby("placa")["litros"].sum().sort_values(ascending=False)
+    st.bar_chart(consumo_por_placa)
 
-    return combustivel, externo, interno
+    # --- Tabela de Compras ---
+    st.markdown("### 🧾 Compras de Diesel (Fornecedor)")
+    st.dataframe(fornecedor[["emissão", "fornecedor - nome", "valor pago"]])
 
-# App Streamlit
-def main():
-    st.title("📊 BI de Abastecimento - Diagnóstico de Planilhas")
-
-    st.sidebar.header("🔼 Upload das planilhas")
-    arquivo_combustivel = st.sidebar.file_uploader("Planilha Combustível", type=['xls', 'xlsx'])
-    arquivo_externo = st.sidebar.file_uploader("Planilha Abastecimento Externo", type=['xls', 'xlsx'])
-    arquivo_interno = st.sidebar.file_uploader("Planilha Abastecimento Interno", type=['xls', 'xlsx'])
-
-    if arquivo_combustivel and arquivo_externo and arquivo_interno:
-        combustivel, externo, interno = carregar_planilhas(arquivo_combustivel, arquivo_externo, arquivo_interno)
-
-        if combustivel is not None:
-            st.success("✅ Todas as planilhas foram carregadas corretamente.")
-            st.subheader("🟢 Visualização rápida dos dados")
-            st.markdown("### Planilha Combustível")
-            st.dataframe(combustivel.head())
-
-            st.markdown("### Planilha Abastecimento Externo")
-            st.dataframe(externo.head())
-
-            st.markdown("### Planilha Abastecimento Interno")
-            st.dataframe(interno.head())
-        else:
-            st.warning("⚠️ Corrija as colunas das planilhas conforme informado acima para continuar.")
-    else:
-        st.info("🔁 Faça upload das **três planilhas** para iniciar.")
-
-if __name__ == '__main__':
-    main()
+else:
+    st.info("👈 Envie as três planilhas na barra lateral para visualizar os dados.")
