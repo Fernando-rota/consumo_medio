@@ -33,10 +33,10 @@ if externo_file and interno_file and fornecedor_file:
 
         # Mapeamento de colunas possíveis
         mapa_externo = {
-            "data": ["data"],
-            "placa": ["placa"],
-            "km_atual": ["km atual", "odômetro"],
-            "litros": ["consumo", "quantidade de litros"],
+            "data": ["data", "data do abastecimento"],
+            "placa": ["placa", "veículo"],
+            "km_atual": ["km atual", "odômetro", "km"],
+            "litros": ["consumo", "qtd abastecida", "litros", "quantidade de litros"],
             "valor_pago": ["valor pago", "custo total", "valor"]
         }
 
@@ -44,7 +44,7 @@ if externo_file and interno_file and fornecedor_file:
             "data": ["data"],
             "placa": ["placa"],
             "tipo": ["tipo"],
-            "litros": ["quantidade de litros"]
+            "litros": ["quantidade de litros", "litros"]
         }
 
         mapa_fornecedor = {
@@ -60,17 +60,25 @@ if externo_file and interno_file and fornecedor_file:
         interno = mapear_colunas(interno, mapa_interno)
         fornecedor = mapear_colunas(fornecedor, mapa_fornecedor)
 
+        # Validação de colunas essenciais
+        colunas_essenciais = ["data", "placa", "km_atual", "litros"]
+        colunas_faltantes = [col for col in colunas_essenciais if col not in externo.columns]
+        if colunas_faltantes:
+            st.error(f"❌ As seguintes colunas estão faltando na planilha de abastecimento externo: {colunas_faltantes}")
+            st.write("📄 Colunas encontradas no arquivo:", list(externo.columns))
+            st.stop()
+
         # Tratamento externo
-        externo = externo.dropna(subset=["data", "placa", "km_atual", "litros"])
         externo["data"] = pd.to_datetime(externo["data"], errors="coerce")
+        externo = externo.dropna(subset=["data", "placa", "km_atual", "litros"])
         externo = externo[~externo["placa"].isin(["-", "correção"])]
         externo = externo.sort_values(by=["placa", "data"])
         externo["km_rodado"] = externo.groupby("placa")["km_atual"].diff()
         externo["km_litro"] = externo["km_rodado"] / externo["litros"]
 
-        # Tratamento interno (somente "Saída")
-        interno = interno[interno["tipo"].str.lower() == "saida"]
+        # Tratamento interno
         interno["data"] = pd.to_datetime(interno["data"], errors="coerce")
+        interno = interno[interno["tipo"].str.lower() == "saida"]
         interno = interno[~interno["placa"].isin(["-", "correção"])]
 
         # Tratamento fornecedor
@@ -78,7 +86,6 @@ if externo_file and interno_file and fornecedor_file:
         total_pago = fornecedor["valor_pago"].sum()
         total_litros_internos = interno["litros"].sum()
         preco_medio_interno = total_pago / total_litros_internos if total_litros_internos > 0 else np.nan
-
         preco_medio_externo = (externo["valor_pago"] / externo["litros"]).mean()
 
         # KPIs
@@ -103,5 +110,6 @@ if externo_file and interno_file and fornecedor_file:
 
     except Exception as e:
         st.error(f"⚠️ Erro ao processar os dados: {str(e)}")
+
 else:
     st.info("👈 Envie as três planilhas na barra lateral para visualizar o dashboard.")
