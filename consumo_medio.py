@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import datetime
 
 st.set_page_config(page_title='⛽ Dashboard de Abastecimento', layout='wide')
 
@@ -50,6 +51,7 @@ def main():
     df_ext = carregar_base(up_ext, 'Base Externa')
     df_int = carregar_base(up_int, 'Base Interna')
     df_val = carregar_base(up_val, 'Base Combustível (Valores)')
+
     if df_ext is None or df_int is None or df_val is None:
         return
 
@@ -78,22 +80,88 @@ def main():
     df_val['DATA'] = pd.to_datetime(df_val['EMISSÃO'], dayfirst=True, errors='coerce')
     df_val['VALOR'] = df_val['VALOR'].apply(tratar_valor)
 
-    # Filtro de data interativo
-    min_data = max(pd.Timestamp('2023-01-01'),
-                   min(df_ext['DATA'].min(), df_int['DATA'].min(), df_val['DATA'].min()))
-    max_data = max(df_ext['DATA'].max(), df_int['DATA'].max(), df_val['DATA'].max())
+    df_ext.dropna(subset=['DATA'], inplace=True)
+    df_int.dropna(subset=['DATA'], inplace=True)
+    df_val.dropna(subset=['DATA'], inplace=True)
 
-    data_selecao = st.sidebar.slider(
-        '📅 Selecione o intervalo de datas',
-        min_value=min_data.date(),
-        max_value=max_data.date(),
-        value=(min_data.date(), max_data.date()),
-        format='DD/MM/YYYY'
-    )
+    st.sidebar.header('📅 Filtro de Data')
 
-    df_ext = df_ext[(df_ext['DATA'].dt.date >= data_selecao[0]) & (df_ext['DATA'].dt.date <= data_selecao[1])]
-    df_int = df_int[(df_int['DATA'].dt.date >= data_selecao[0]) & (df_int['DATA'].dt.date <= data_selecao[1])]
-    df_val = df_val[(df_val['DATA'].dt.date >= data_selecao[0]) & (df_val['DATA'].dt.date <= data_selecao[1])]
+    all_dates = pd.concat([df_ext['DATA'], df_int['DATA'], df_val['DATA']]).dropna()
+    min_data_available = all_dates.min().date() if not all_dates.empty else datetime.date(2023, 1, 1)
+    max_data_available = all_dates.max().date() if not all_dates.empty else datetime.date.today()
+
+    default_start_date = min_data_available
+    default_end_date = max_data_available
+
+    opcoes_periodo = [
+        'Intervalo Personalizado',
+        'Hoje',
+        'Ontem',
+        'Últimos 7 Dias',
+        'Últimos 30 Dias',
+        'Este Mês',
+        'Mês Passado',
+        'Este Ano'
+    ]
+
+    periodo_selecionado = st.sidebar.selectbox('Período Rápido:', opcoes_periodo, index=0)
+
+    today = datetime.date.today()
+    start_date_filter = min_data_available
+    end_date_filter = max_data_available
+
+    if periodo_selecionado == 'Hoje':
+        start_date_filter = today
+        end_date_filter = today
+    elif periodo_selecionado == 'Ontem':
+        start_date_filter = today - datetime.timedelta(days=1)
+        end_date_filter = today - datetime.timedelta(days=1)
+    elif periodo_selecionado == 'Últimos 7 Dias':
+        start_date_filter = today - datetime.timedelta(days=6)
+        end_date_filter = today
+    elif periodo_selecionado == 'Últimos 30 Dias':
+        start_date_filter = today - datetime.timedelta(days=29)
+        end_date_filter = today
+    elif periodo_selecionado == 'Este Mês':
+        start_date_filter = today.replace(day=1)
+        end_date_filter = today
+    elif periodo_selecionado == 'Mês Passado':
+        first_day_prev_month = (today.replace(day=1) - datetime.timedelta(days=1)).replace(day=1)
+        last_day_prev_month = today.replace(day=1) - datetime.timedelta(days=1)
+        start_date_filter = first_day_prev_month
+        end_date_filter = last_day_prev_month
+    elif periodo_selecionado == 'Este Ano':
+        start_date_filter = today.replace(month=1, day=1)
+        end_date_filter = today
+
+    if periodo_selecionado == 'Intervalo Personalizado':
+        st.sidebar.markdown(
+            "**Dica:** Para anos distantes, **digite a data** (ex: 01/01/2018) no campo abaixo."
+        )
+        data_selecao_manual = st.sidebar.date_input(
+            'Ou selecione as datas manualmente:',
+            value=(default_start_date, default_end_date),
+            min_value=min_data_available,
+            max_value=max_data_available
+        )
+        if len(data_selecao_manual) == 2:
+            start_date_filter = data_selecao_manual[0]
+            end_date_filter = data_selecao_manual[1]
+        elif len(data_selecao_manual) == 1:
+            start_date_filter = data_selecao_manual[0]
+            end_date_filter = data_selecao_manual[0]
+        else:
+            pass
+
+    start_date_filter = max(start_date_filter, min_data_available)
+    end_date_filter = min(end_date_filter, max_data_available)
+
+    df_ext = df_ext[(df_ext['DATA'].dt.date >= start_date_filter) & (df_ext['DATA'].dt.date <= end_date_filter)]
+    df_int = df_int[(df_int['DATA'].dt.date >= start_date_filter) & (df_int['DATA'].dt.date <= end_date_filter)]
+    df_val = df_val[(df_val['DATA'].dt.date >= start_date_filter) & (df_val['DATA'].dt.date <= end_date_filter)]
+
+
+    # --- INÍCIO DAS ALTERAÇÕES PARA FILTRO DE PLACA E DUPLICATAS ---
 
     combustivel_col = next((col for col in df_ext.columns if 'DESCRI' in col), None)
     if combustivel_col:
@@ -108,16 +176,26 @@ def main():
     else:
         filtro_combustivel = 'Todos'
 
-    placas = sorted(pd.concat([df_ext['PLACA'], df_int['PLACA']]).dropna().unique())
-    filtro_placa = st.sidebar.selectbox('🚗 Placa:', ['Todas'] + placas)
+    # Correção: Remover duplicatas na lista de placas
+    placas_ext = df_ext['PLACA'].dropna().unique()
+    placas_int = df_int['PLACA'].dropna().unique()
+    # Concatena e remove duplicatas para a lista de seleção
+    todas_placas = pd.Series(list(placas_ext) + list(placas_int)).astype(str).str.upper().str.strip().drop_duplicates().sort_values().tolist()
+
+    filtro_placa = st.sidebar.selectbox('🚗 Placa:', ['Todas'] + todas_placas)
 
     if filtro_combustivel != 'Todos' and combustivel_col:
         df_ext = df_ext[df_ext[combustivel_col] == filtro_combustivel]
+
+    # Aplica o filtro de placa apenas em df_ext e df_int
     if filtro_placa != 'Todas':
         df_ext = df_ext[df_ext['PLACA'] == filtro_placa]
         df_int = df_int[df_int['PLACA'] == filtro_placa]
-        if 'PLACA' in df_val.columns:
-            df_val = df_val[df_val['PLACA'] == filtro_placa]
+        # Removido: A base df_val (valores de combustível) geralmente não é filtrada por placa,
+        # pois contém os preços de compra gerais por data, não por veículo específico.
+        # Se df_val PRECISA ser filtrada por placa, por favor, me informe como as placas se relacionam.
+    # --- FIM DAS ALTERAÇÕES PARA FILTRO DE PLACA E DUPLICATAS ---
+
 
     df_ext['PLACA'] = df_ext['PLACA'].astype(str).str.upper().str.strip()
     df_int['PLACA'] = df_int['PLACA'].astype(str).str.upper().str.strip()
@@ -129,7 +207,7 @@ def main():
     litros_ext = df_ext['LITROS'].sum()
     valor_ext = df_ext['CUSTO TOTAL'].sum()
     litros_int = df_int['QUANTIDADE DE LITROS'].sum()
-    valor_int = df_val['VALOR'].sum()
+    valor_int = df_val['VALOR'].sum() # df_val.sum() é a soma dos valores da base de valores de combustível, que já foi filtrada por data.
 
     total_litros = litros_ext + litros_int
     perc_ext = (litros_ext / total_litros * 100) if total_litros > 0 else 0
@@ -143,7 +221,8 @@ def main():
     ])
 
     with tab1:
-        st.markdown(f"### 📆 Período Selecionado: `{data_selecao[0].strftime('%d/%m/%Y')} a {data_selecao[1].strftime('%d/%m/%Y')}`")
+        st.markdown(f"### 📆 Período Selecionado: "
+                    f"`{start_date_filter.strftime('%d/%m/%Y')} a {end_date_filter.strftime('%d/%m/%Y')}`")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric('⛽ Litros (Externo)', f'{litros_ext:,.2f} L', delta=f'{perc_ext:.1f} %')
         c2.metric('💸 Custo (Externo)', f'R$ {valor_ext:,.2f}')
@@ -172,13 +251,13 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             fig1 = px.bar(top_ext, y='PLACA', x='LITROS', orientation='h',
-                          title='🔹 Top 10 Externo', color='LITROS', color_continuous_scale='Blues', text_auto='.2s')
+                            title='🔹 Top 10 Externo', color='LITROS', color_continuous_scale='Blues', text_auto='.2s')
             fig1.update_layout(yaxis={'categoryorder': 'total ascending'})
             st.plotly_chart(fig1, use_container_width=True)
 
         with col2:
             fig2 = px.bar(top_int, y='PLACA', x='QUANTIDADE DE LITROS', orientation='h',
-                          title='🟢 Top 10 Interno', color='QUANTIDADE DE LITROS', color_continuous_scale='Greens', text_auto='.2s')
+                            title='🟢 Top 10 Interno', color='QUANTIDADE DE LITROS', color_continuous_scale='Greens', text_auto='.2s')
             fig2.update_layout(yaxis={'categoryorder': 'total ascending'})
             st.plotly_chart(fig2, use_container_width=True)
 
@@ -214,8 +293,8 @@ def main():
 
         with col2:
             fig3 = px.bar(consumo_medio, x='Km/L', y='placa', orientation='h',
-                          color='Km/L', color_continuous_scale='Viridis', text_auto='.2f',
-                          title='Eficiência por Veículo (Km/L)')
+                            color='Km/L', color_continuous_scale='Viridis', text_auto='.2f',
+                            title='Eficiência por Veículo (Km/L)')
             fig3.update_layout(yaxis={'categoryorder': 'total descending'})
             st.plotly_chart(fig3, use_container_width=True)
 
@@ -229,16 +308,16 @@ def main():
         df_int_agg = df_int_agg.rename(columns={'QUANTIDADE DE LITROS': 'QTDE_LITROS'})
 
         df_preco_medio_int = pd.merge(df_val_agg, df_int_agg, on='DATA', how='inner')
-
-        df_preco_medio_int['PRECO_MEDIO'] = df_preco_medio_int.apply(
-            lambda row: row['VALOR'] / row['QTDE_LITROS'] if row['QTDE_LITROS'] > 0 else 0, axis=1)
+        if not df_preco_medio_int.empty:
+            df_preco_medio_int['PRECO_MEDIO'] = df_preco_medio_int.apply(
+                lambda row: row['VALOR'] / row['QTDE_LITROS'] if row['QTDE_LITROS'] > 0 else 0, axis=1)
 
         fig_ext_litros = px.line(df_ext_agg, x='DATA', y='LITROS', markers=True,
                                  title='Litros Consumidos (Externo)', labels={'LITROS':'Litros', 'DATA':'Data'})
         st.plotly_chart(fig_ext_litros, use_container_width=True)
 
         fig_ext_custo = px.line(df_ext_agg, x='DATA', y='CUSTO TOTAL', markers=True,
-                                title='Custo Total (Externo)', labels={'CUSTO TOTAL':'R$', 'DATA':'Data'})
+                                 title='Custo Total (Externo)', labels={'CUSTO TOTAL':'R$', 'DATA':'Data'})
         st.plotly_chart(fig_ext_custo, use_container_width=True)
 
         fig_int_litros = px.line(df_int_agg, x='DATA', y='QTDE_LITROS', markers=True,
@@ -246,13 +325,16 @@ def main():
         st.plotly_chart(fig_int_litros, use_container_width=True)
 
         fig_int_custo = px.line(df_val_agg, x='DATA', y='VALOR', markers=True,
-                                title='Custo Total (Interno)', labels={'VALOR':'R$', 'DATA':'Data'})
+                                 title='Custo Total (Interno)', labels={'VALOR':'R$', 'DATA':'Data'})
         st.plotly_chart(fig_int_custo, use_container_width=True)
 
-        fig_preco_medio = px.line(df_preco_medio_int, x='DATA', y='PRECO_MEDIO', markers=True,
-                                  title='Preço Médio do Combustível (Interno) [R$/Litro]',
-                                  labels={'PRECO_MEDIO':'R$/Litro', 'DATA':'Data'})
-        st.plotly_chart(fig_preco_medio, use_container_width=True)
+        if not df_preco_medio_int.empty:
+            fig_preco_medio = px.line(df_preco_medio_int, x='DATA', y='PRECO_MEDIO', markers=True,
+                                     title='Preço Médio do Combustível (Interno) [R$/Litro]',
+                                     labels={'PRECO_MEDIO':'R$/Litro', 'DATA':'Data'})
+            st.plotly_chart(fig_preco_medio, use_container_width=True)
+        else:
+            st.info("Não há dados de custo e litros internos para calcular o preço médio neste período.")
 
 if __name__ == '__main__':
     main()
