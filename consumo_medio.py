@@ -10,49 +10,49 @@ def carregar_dados(uploaded_file):
         interno = pd.read_excel(uploaded_file, sheet_name='Abastecimento Interno')
         externo = pd.read_excel(uploaded_file, sheet_name='Abastecimento Externo')
 
-        # Padronizar colunas interno
+        # Padronizar - Abastecimento Interno
         interno = interno.rename(columns={
-            'Placa': 'placa',
             'Data': 'data',
+            'Placa': 'placa',
             'Quantidade de litros': 'litros',
             'KM Atual': 'km_atual',
             'Tipo': 'tipo'
         })
         interno['data'] = pd.to_datetime(interno['data'], dayfirst=True, errors='coerce')
         interno['placa'] = interno['placa'].astype(str).str.strip().str.upper()
-        interno['km_atual'] = pd.to_numeric(interno['km_atual'], errors='coerce')
         interno['litros'] = pd.to_numeric(interno['litros'], errors='coerce')
+        interno['km_atual'] = pd.to_numeric(interno['km_atual'], errors='coerce')
         interno['tipo'] = interno['tipo'].astype(str).str.lower()
 
-        # Filtrar só saídas no interno
+        # Filtrar apenas saídas no interno
         interno = interno[interno['tipo'] == 'saída']
 
-        # Padronizar externo
+        # Padronizar - Abastecimento Externo
         externo = externo.rename(columns={
-            'Placa': 'placa',
             'Data': 'data',
+            'Placa': 'placa',
             'Quantidade de litros': 'litros',
             'KM Atual': 'km_atual'
         })
         externo['data'] = pd.to_datetime(externo['data'], dayfirst=True, errors='coerce')
         externo['placa'] = externo['placa'].astype(str).str.strip().str.upper()
-        externo['km_atual'] = pd.to_numeric(externo['km_atual'], errors='coerce')
         externo['litros'] = pd.to_numeric(externo['litros'], errors='coerce')
+        externo['km_atual'] = pd.to_numeric(externo['km_atual'], errors='coerce')
         externo['tipo'] = 'externo'
 
         # Marcar tipo interno
         interno['tipo'] = 'interno'
 
-        # Concatenar
+        # Concatenar dataframes
         df = pd.concat([interno, externo], ignore_index=True)
 
-        # Ordenar e calcular diferenças de km
+        # Ordenar e calcular diferença de km
         df = df.sort_values(['placa', 'data', 'km_atual']).reset_index(drop=True)
         df['km_diff'] = df.groupby('placa')['km_atual'].diff()
         df['consumo_por_km'] = df['litros'] / df['km_diff']
         df['km_por_litro'] = 1 / df['consumo_por_km']
 
-        # Limpar dados inválidos
+        # Remover registros inválidos
         df = df.dropna(subset=['km_diff', 'consumo_por_km'])
         df = df[df['km_diff'] > 0]
 
@@ -62,15 +62,15 @@ def carregar_dados(uploaded_file):
         st.error(f'Erro ao carregar/processar os dados: {e}')
         return pd.DataFrame()
 
-# Função para calcular métricas gerais
+# Calcular métricas principais
 def calcular_metricas(df):
     total_abastecimentos = df.shape[0]
     total_litros = df['litros'].sum()
     km_rodados = df['km_diff'].sum()
     consumo_medio_geral = (total_litros / km_rodados) if km_rodados > 0 else np.nan
 
-    consumo_interno = df[df['tipo']=='interno']
-    consumo_externo = df[df['tipo']=='externo']
+    consumo_interno = df[df['tipo'] == 'interno']
+    consumo_externo = df[df['tipo'] == 'externo']
 
     consumo_medio_interno = (consumo_interno['litros'].sum() / consumo_interno['km_diff'].sum()) if consumo_interno['km_diff'].sum() > 0 else np.nan
     consumo_medio_externo = (consumo_externo['litros'].sum() / consumo_externo['km_diff'].sum()) if consumo_externo['km_diff'].sum() > 0 else np.nan
@@ -84,7 +84,7 @@ def calcular_metricas(df):
         'consumo_medio_externo': consumo_medio_externo
     }
 
-# Função para consumo médio por veículo
+# Consumo médio por veículo
 def consumo_medio_por_veiculo(df):
     df_agg = df.groupby('placa').agg({
         'litros': 'sum',
@@ -94,14 +94,14 @@ def consumo_medio_por_veiculo(df):
     df_agg['km_por_litro'] = 1 / df_agg['consumo_medio']
     return df_agg.sort_values('km_por_litro', ascending=False)
 
-# Função para plotar tendência de consumo por veículo
+# Gráfico de tendência mensal do consumo por veículo
 def grafico_tendencia(df, placa):
     df_veiculo = df[df['placa'] == placa].copy()
     if df_veiculo.empty:
         return None
 
     df_veiculo['mes'] = df_veiculo['data'].dt.to_period('M').dt.to_timestamp()
-    df_mes = df_veiculo.groupby('mes').agg({'litros':'sum', 'km_diff':'sum'}).reset_index()
+    df_mes = df_veiculo.groupby('mes').agg({'litros': 'sum', 'km_diff': 'sum'}).reset_index()
     df_mes['consumo'] = df_mes['litros'] / df_mes['km_diff']
     df_mes['km_por_litro'] = 1 / df_mes['consumo']
 
@@ -110,7 +110,7 @@ def grafico_tendencia(df, placa):
     fig.update_layout(yaxis_title='Km por Litro', xaxis_title='Mês')
     return fig
 
-# App principal
+# Main app
 def main():
     st.set_page_config(page_title='Dashboard Consumo Médio - Frota', layout='wide')
     st.title('🚛 Dashboard de Consumo Médio da Frota')
@@ -158,9 +158,9 @@ def main():
     # Consumo médio por veículo
     st.subheader('Consumo Médio por Veículo (Km/L)')
     df_consumo = consumo_medio_por_veiculo(df_filtrado)
-    st.dataframe(df_consumo[['placa', 'km_por_litro']].rename(columns={'placa':'Veículo', 'km_por_litro':'Km por Litro'}).style.format({'Km por Litro': '{:.2f}'}))
+    st.dataframe(df_consumo[['placa', 'km_por_litro']].rename(columns={'placa': 'Veículo', 'km_por_litro': 'Km por Litro'}).style.format({'Km por Litro': '{:.2f}'}))
 
-    # Ranking dos melhores e piores consumos
+    # Ranking de consumo
     st.subheader('Ranking de Consumo')
     melhores = df_consumo.head(3)
     piores = df_consumo.tail(3)
@@ -168,10 +168,10 @@ def main():
     col7, col8 = st.columns(2)
     with col7:
         st.markdown('**Melhores Consumidores (Km/L)**')
-        st.table(melhores[['placa', 'km_por_litro']].rename(columns={'placa':'Veículo', 'km_por_litro':'Km por Litro'}).style.format({'Km por Litro': '{:.2f}'}))
+        st.table(melhores[['placa', 'km_por_litro']].rename(columns={'placa': 'Veículo', 'km_por_litro': 'Km por Litro'}).style.format({'Km por Litro': '{:.2f}'}))
     with col8:
         st.markdown('**Piores Consumidores (Km/L)**')
-        st.table(piores[['placa', 'km_por_litro']].rename(columns={'placa':'Veículo', 'km_por_litro':'Km por Litro'}).style.format({'Km por Litro': '{:.2f}'}))
+        st.table(piores[['placa', 'km_por_litro']].rename(columns={'placa': 'Veículo', 'km_por_litro': 'Km por Litro'}).style.format({'Km por Litro': '{:.2f}'}))
 
     st.markdown('---')
 
