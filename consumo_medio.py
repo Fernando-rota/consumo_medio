@@ -62,7 +62,6 @@ def carregar_dados(uploaded_file):
         st.error(f'Erro ao carregar/processar os dados: {e}')
         return pd.DataFrame()
 
-# Calcular métricas principais
 def calcular_metricas(df):
     total_abastecimentos = df.shape[0]
     total_litros = df['litros'].sum()
@@ -84,7 +83,6 @@ def calcular_metricas(df):
         'consumo_medio_externo': consumo_medio_externo
     }
 
-# Consumo médio por veículo
 def consumo_medio_por_veiculo(df):
     df_agg = df.groupby('placa').agg({
         'litros': 'sum',
@@ -94,7 +92,6 @@ def consumo_medio_por_veiculo(df):
     df_agg['km_por_litro'] = 1 / df_agg['consumo_medio']
     return df_agg.sort_values('km_por_litro', ascending=False)
 
-# Gráfico de tendência mensal do consumo por veículo
 def grafico_tendencia(df, placa):
     df_veiculo = df[df['placa'] == placa].copy()
     if df_veiculo.empty:
@@ -110,7 +107,6 @@ def grafico_tendencia(df, placa):
     fig.update_layout(yaxis_title='Km por Litro', xaxis_title='Mês')
     return fig
 
-# Main app
 def main():
     st.set_page_config(page_title='Dashboard Consumo Médio - Frota', layout='wide')
     st.title('🚛 Dashboard de Consumo Médio da Frota')
@@ -141,48 +137,59 @@ def main():
         (df['data'] <= pd.to_datetime(periodo[1]))
     ]
 
-    # Métricas gerais
     metricas = calcular_metricas(df_filtrado)
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric('Abastecimentos', f"{metricas['total_abastecimentos']}")
-    col2.metric('Litros Totais', f"{metricas['total_litros']:.2f} L")
-    col3.metric('KM Rodados', f"{metricas['km_rodados']:.0f} km")
-    col4.metric('Consumo Médio Geral', f"{(1/metricas['consumo_medio_geral']):.2f} km/L" if not np.isnan(metricas['consumo_medio_geral']) else 'N/A')
-
-    col5, col6 = st.columns(2)
-    col5.metric('Consumo Médio Interno', f"{(1/metricas['consumo_medio_interno']):.2f} km/L" if not np.isnan(metricas['consumo_medio_interno']) else 'N/A')
-    col6.metric('Consumo Médio Externo', f"{(1/metricas['consumo_medio_externo']):.2f} km/L" if not np.isnan(metricas['consumo_medio_externo']) else 'N/A')
-
-    st.markdown('---')
-
-    # Consumo médio por veículo
-    st.subheader('Consumo Médio por Veículo (Km/L)')
     df_consumo = consumo_medio_por_veiculo(df_filtrado)
-    st.dataframe(df_consumo[['placa', 'km_por_litro']].rename(columns={'placa': 'Veículo', 'km_por_litro': 'Km por Litro'}).style.format({'Km por Litro': '{:.2f}'}))
 
-    # Ranking de consumo
-    st.subheader('Ranking de Consumo')
-    melhores = df_consumo.head(3)
-    piores = df_consumo.tail(3)
+    # Criar abas
+    aba_geral, aba_veiculos, aba_tendencias = st.tabs(['📊 Visão Geral', '🚗 Detalhes por Veículo', '📈 Tendências'])
 
-    col7, col8 = st.columns(2)
-    with col7:
-        st.markdown('**Melhores Consumidores (Km/L)**')
-        st.table(melhores[['placa', 'km_por_litro']].rename(columns={'placa': 'Veículo', 'km_por_litro': 'Km por Litro'}).style.format({'Km por Litro': '{:.2f}'}))
-    with col8:
-        st.markdown('**Piores Consumidores (Km/L)**')
-        st.table(piores[['placa', 'km_por_litro']].rename(columns={'placa': 'Veículo', 'km_por_litro': 'Km por Litro'}).style.format({'Km por Litro': '{:.2f}'}))
+    with aba_geral:
+        st.header('Visão Geral da Frota')
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric('Abastecimentos', f"{metricas['total_abastecimentos']}")
+        col2.metric('Litros Totais', f"{metricas['total_litros']:.2f} L")
+        col3.metric('KM Rodados', f"{metricas['km_rodados']:.0f} km")
+        col4.metric('Consumo Médio Geral', f"{(1/metricas['consumo_medio_geral']):.2f} km/L" if not np.isnan(metricas['consumo_medio_geral']) else 'N/A')
 
-    st.markdown('---')
+        col5, col6 = st.columns(2)
+        col5.metric('Consumo Médio Interno', f"{(1/metricas['consumo_medio_interno']):.2f} km/L" if not np.isnan(metricas['consumo_medio_interno']) else 'N/A')
+        col6.metric('Consumo Médio Externo', f"{(1/metricas['consumo_medio_externo']):.2f} km/L" if not np.isnan(metricas['consumo_medio_externo']) else 'N/A')
 
-    # Gráfico de tendência por veículo
-    st.subheader('Tendência de Consumo por Veículo')
-    veiculo_analise = st.selectbox('Selecione o veículo para análise detalhada:', placas_selecionadas)
-    fig = grafico_tendencia(df_filtrado, veiculo_analise)
-    if fig:
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info('Sem dados suficientes para gerar gráfico.')
+        st.markdown('---')
+        st.markdown('### Distribuição do Consumo Médio por Veículo')
+        fig_bar = px.bar(df_consumo, x='placa', y='km_por_litro',
+                         labels={'placa': 'Veículo', 'km_por_litro': 'Km por Litro'},
+                         title='Consumo Médio (Km/L) por Veículo',
+                         color='km_por_litro', color_continuous_scale='Viridis')
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    with aba_veiculos:
+        st.header('Detalhes por Veículo')
+
+        st.markdown('### Ranking de Consumo')
+        melhores = df_consumo.head(5)
+        piores = df_consumo.tail(5)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown('**Melhores Consumidores (Km/L)**')
+            st.table(melhores[['placa', 'km_por_litro']].rename(columns={'placa': 'Veículo', 'km_por_litro': 'Km por Litro'}).style.format({'Km por Litro': '{:.2f}'}))
+        with col2:
+            st.markdown('**Piores Consumidores (Km/L)**')
+            st.table(piores[['placa', 'km_por_litro']].rename(columns={'placa': 'Veículo', 'km_por_litro': 'Km por Litro'}).style.format({'Km por Litro': '{:.2f}'}))
+
+        st.markdown('---')
+        st.markdown('### Tabela Completa')
+        st.dataframe(df_consumo.rename(columns={'placa': 'Veículo', 'km_por_litro': 'Km por Litro'}).style.format({'Km por Litro': '{:.2f}'}))
+
+    with aba_tendencias:
+        st.header('Tendência de Consumo ao Longo do Tempo')
+        veiculo_analise = st.selectbox('Selecione o veículo:', placas_selecionadas)
+        fig = grafico_tendencia(df_filtrado, veiculo_analise)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info('Sem dados suficientes para gerar gráfico.')
 
 if __name__ == '__main__':
     main()
