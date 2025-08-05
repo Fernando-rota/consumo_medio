@@ -1,79 +1,73 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="Dashboard de Abastecimento", layout="wide")
+st.title('Relatório de Consumo Médio por Veículo')
 
-st.title("⛽ Dashboard de Abastecimento - Interno vs Externo")
-
-# Upload do arquivo
-uploaded_file = st.file_uploader("Faça upload da planilha (.xlsx) com abas 'abastecimento interno' e 'abastecimento externo'", type=["xlsx"])
+uploaded_file = st.file_uploader('Faça upload do arquivo "Abastecimento - Planilhas" (.xlsx)', type=['xlsx'])
 
 if uploaded_file:
-    # Leitura das abas com os nomes exatos
     try:
-        df_interno = pd.read_excel(uploaded_file, sheet_name="abastecimento interno")
-        df_externo = pd.read_excel(uploaded_file, sheet_name="abastecimento externo")
+        # Ler as duas abas do Excel
+        externo = pd.read_excel(uploaded_file, sheet_name='Abastecimento Externo')
+        interno = pd.read_excel(uploaded_file, sheet_name='Abastecimento Interno')
+
+        st.write('### Preview - Abastecimento Externo')
+        st.dataframe(externo.head())
+
+        st.write('### Preview - Abastecimento Interno')
+        st.dataframe(interno.head())
+
+        # Padronizar colunas do Externo
+        externo = externo.rename(columns={
+            'PLACA': 'placa',
+            'DATA': 'data',
+            'KM ATUAL': 'km_atual',
+            'CONSUMO': 'litros'
+        })
+        externo['data'] = pd.to_datetime(externo['data'], dayfirst=True, errors='coerce')
+        externo['placa'] = externo['placa'].astype(str).str.replace(' ', '').str.upper()
+        externo['km_atual'] = pd.to_numeric(externo['km_atual'], errors='coerce')
+        externo['litros'] = pd.to_numeric(externo['litros'], errors='coerce')
+
+        # Padronizar colunas do Interno
+        interno = interno.rename(columns={
+            'Placa': 'placa',
+            'Data': 'data',
+            'KM Atual': 'km_atual',
+            'Quantidade de litros': 'litros'
+        })
+        interno['data'] = pd.to_datetime(interno['data'], dayfirst=True, errors='coerce')
+        interno['placa'] = interno['placa'].astype(str).str.replace(' ', '').str.upper()
+        interno['km_atual'] = pd.to_numeric(interno['km_atual'], errors='coerce')
+        interno['litros'] = pd.to_numeric(interno['litros'], errors='coerce')
+
+        # Concatenar as duas bases
+        df = pd.concat([
+            externo[['placa', 'data', 'km_atual', 'litros']],
+            interno[['placa', 'data', 'km_atual', 'litros']]
+        ], ignore_index=True)
+
+        # Ordenar
+        df = df.sort_values(['placa', 'data', 'km_atual']).reset_index(drop=True)
+
+        # Calcular diferença de km para cada placa
+        df['km_diff'] = df.groupby('placa')['km_atual'].diff()
+
+        # Calcular consumo por km
+        df['consumo_por_km'] = df['litros'] / df['km_diff']
+
+        # Filtrar dados válidos
+        df_clean = df.dropna(subset=['km_diff', 'consumo_por_km'])
+        df_clean = df_clean[df_clean['km_diff'] > 0]
+
+        # Consumo médio por veículo
+        consumo_medio = df_clean.groupby('placa')['consumo_por_km'].mean().reset_index()
+        consumo_medio['km_por_litro'] = 1 / consumo_medio['consumo_por_km']
+
+        st.write('### Consumo Médio por Veículo (Km por Litro)')
+        st.dataframe(consumo_medio[['placa', 'km_por_litro']].sort_values('km_por_litro', ascending=False))
+
     except Exception as e:
-        st.error("Erro ao ler as planilhas. Verifique se há abas chamadas 'abastecimento interno' e 'abastecimento externo'.")
-        st.stop()
-
-    # Normalização das colunas
-    colunas = ['Data', 'Placa', 'Codigo Despesa', 'Descrição Despesa', 'CNPJ Fornecedor',
-               'Quantidade de litros', 'Valor Unitario', 'Valor Total', 'KM Atual', 'Observações']
-
-    df_interno = df_interno[colunas].copy()
-    df_externo = df_externo[colunas].copy()
-
-    df_interno['Fonte'] = 'Interno'
-    df_externo['Fonte'] = 'Externo'
-
-    # Combina os dois DataFrames
-    df = pd.concat([df_interno, df_externo], ignore_index=True)
-
-    # Conversões
-    df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
-    df['Quantidade de litros'] = pd.to_numeric(df['Quantidade de litros'], errors='coerce')
-    df['Valor Total'] = pd.to_numeric(df['Valor Total'].astype(str).str.replace('R$', '').str.replace(',', '.'), errors='coerce')
-    df['Valor Unitario'] = pd.to_numeric(df['Valor Unitario'].astype(str).str.replace('R$', '').str.replace(',', '.'), errors='coerce')
-
-    # Filtros
-    st.sidebar.header("🔍 Filtros")
-    placas = st.sidebar.multiselect("Filtrar por placa:", df["Placa"].dropna().unique())
-    combustiveis = st.sidebar.multiselect("Filtrar por combustível:", df["Descrição Despesa"].dropna().unique())
-    fontes = st.sidebar.multiselect("Filtrar por origem:", df["Fonte"].unique(), default=["Interno", "Externo"])
-
-    df_filtrado = df.copy()
-
-    if placas:
-        df_filtrado = df_filtrado[df_filtrado["Placa"].isin(placas)]
-    if combustiveis:
-        df_filtrado = df_filtrado[df_filtrado["Descrição Despesa"].isin(combustiveis)]
-    if fontes:
-        df_filtrado = df_filtrado[df_filtrado["Fonte"].isin(fontes)]
-
-    st.subheader("📈 Indicadores Gerais")
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Litros Abastecidos", f"{df_filtrado['Quantidade de litros'].sum():,.2f} L")
-    col2.metric("Valor Total", f"R$ {df_filtrado['Valor Total'].sum():,.2f}")
-    preco_medio_geral = df_filtrado['Valor Total'].sum() / df_filtrado['Quantidade de litros'].sum()
-    col3.metric("Preço Médio (Geral)", f"R$ {preco_medio_geral:.2f}")
-
-    st.divider()
-    st.subheader("📊 Indicadores por Tipo de Combustível e Fonte")
-
-    combustiveis = df_filtrado["Descrição Despesa"].dropna().unique()
-    fontes = df_filtrado["Fonte"].dropna().unique()
-
-    for combustivel in combustiveis:
-        st.markdown(f"### ⛽ {combustivel}")
-        cols = st.columns(len(fontes))
-        for i, fonte in enumerate(fontes):
-            temp = df_filtrado[(df_filtrado["Descrição Despesa"] == combustivel) & (df_filtrado["Fonte"] == fonte)]
-            litros = temp["Quantidade de litros"].sum()
-            valor = temp["Valor Total"].sum()
-            preco_medio = valor / litros if litros > 0 else 0
-            with cols[i]:
-                st.metric(f"{fonte}", f"{litros:,.2f} L", help=f"Total abastecido via {fonte}")
-                st.metric(f"Valor Total", f"R$ {valor:,.2f}")
-                st.metric(f"Preço Médio", f"R$ {preco_medio:.2f}")
+        st.error(f'Erro ao processar o arquivo: {e}')
+else:
+    st.info('Por favor, faça upload do arquivo Excel com as abas "Abastecimento Externo" e "Abastecimento Interno".')
