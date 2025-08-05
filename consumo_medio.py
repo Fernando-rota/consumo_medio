@@ -10,7 +10,7 @@ def carregar_e_processar(arquivo):
     interno = pd.read_excel(arquivo, sheet_name='Abastecimento Interno')
     externo = pd.read_excel(arquivo, sheet_name='Abastecimento Externo')
 
-    # Padronizar colunas e tipos
+    # Padronizar colunas e tipos, usando só a coluna 'Data' para datas
     for df in [interno, externo]:
         df['Placa'] = df['Placa'].astype(str).str.strip().str.upper()
         df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
@@ -20,17 +20,23 @@ def carregar_e_processar(arquivo):
     # Filtrar só saídas no interno
     interno = interno[interno['Tipo'].str.lower() == 'saída']
 
-    # Concatenar
+    # Adicionar coluna para tipo de abastecimento
     interno['TipoAbastecimento'] = 'Interno'
     externo['TipoAbastecimento'] = 'Externo'
+
+    # Concatenar as abas
     df = pd.concat([interno, externo], ignore_index=True)
 
-    # Ordenar e calcular dif de km
-    df = df.sort_values(['Placa', 'Data', 'KM Atual'])
+    # Ordenar usando só a coluna 'Data'
+    df = df.sort_values(['Placa', 'Data'])
+
+    # Calcular diferença de KM pela ordem temporal para cada placa
     df['km_diff'] = df.groupby('Placa')['KM Atual'].diff()
 
     # Calcular consumo (litros / km rodado)
     df['consumo'] = df['Quantidade de litros'] / df['km_diff']
+
+    # Filtrar registros com dados válidos e km_diff > 10 km para evitar distorções
     df = df.dropna(subset=['km_diff', 'consumo'])
     df = df[df['km_diff'] > 10]
 
