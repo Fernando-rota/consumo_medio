@@ -7,56 +7,60 @@ uploaded_file = st.file_uploader('Faça upload do arquivo "Abastecimento - Plani
 
 if uploaded_file:
     try:
-        # Ler as duas abas do Excel
-        externo = pd.read_excel(uploaded_file, sheet_name='Abastecimento Externo')
+        # Ler abas
         interno = pd.read_excel(uploaded_file, sheet_name='Abastecimento Interno')
-
-        st.write('### Preview - Abastecimento Externo')
-        st.dataframe(externo.head())
+        externo = pd.read_excel(uploaded_file, sheet_name='Abastecimento Externo')
 
         st.write('### Preview - Abastecimento Interno')
         st.dataframe(interno.head())
 
-        # Padronizar colunas do Externo
-        externo = externo.rename(columns={
-            'PLACA': 'placa',
-            'DATA': 'data',
-            'KM ATUAL': 'km_atual',
-            'CONSUMO': 'litros'
-        })
-        externo['data'] = pd.to_datetime(externo['data'], dayfirst=True, errors='coerce')
-        externo['placa'] = externo['placa'].astype(str).str.replace(' ', '').str.upper()
-        externo['km_atual'] = pd.to_numeric(externo['km_atual'], errors='coerce')
-        externo['litros'] = pd.to_numeric(externo['litros'], errors='coerce')
+        st.write('### Preview - Abastecimento Externo')
+        st.dataframe(externo.head())
 
-        # Padronizar colunas do Interno
+        # Padronização - Aba Interno
         interno = interno.rename(columns={
             'Placa': 'placa',
             'Data': 'data',
+            'Quantidade de litros': 'litros',
             'KM Atual': 'km_atual',
-            'Quantidade de litros': 'litros'
+            'Tipo': 'tipo'
         })
         interno['data'] = pd.to_datetime(interno['data'], dayfirst=True, errors='coerce')
         interno['placa'] = interno['placa'].astype(str).str.replace(' ', '').str.upper()
         interno['km_atual'] = pd.to_numeric(interno['km_atual'], errors='coerce')
         interno['litros'] = pd.to_numeric(interno['litros'], errors='coerce')
 
-        # Concatenar as duas bases
+        # Filtrar só saídas no interno (caso queira considerar apenas abastecimentos)
+        interno = interno[interno['tipo'].str.lower() == 'saída']
+
+        # Padronização - Aba Externo
+        externo = externo.rename(columns={
+            'Placa': 'placa',
+            'Data': 'data',
+            'Quantidade de litros': 'litros',
+            'KM Atual': 'km_atual'
+        })
+        externo['data'] = pd.to_datetime(externo['data'], dayfirst=True, errors='coerce')
+        externo['placa'] = externo['placa'].astype(str).str.replace(' ', '').str.upper()
+        externo['km_atual'] = pd.to_numeric(externo['km_atual'], errors='coerce')
+        externo['litros'] = pd.to_numeric(externo['litros'], errors='coerce')
+
+        # Concatenar
         df = pd.concat([
-            externo[['placa', 'data', 'km_atual', 'litros']],
-            interno[['placa', 'data', 'km_atual', 'litros']]
+            interno[['placa', 'data', 'km_atual', 'litros']],
+            externo[['placa', 'data', 'km_atual', 'litros']]
         ], ignore_index=True)
 
         # Ordenar
         df = df.sort_values(['placa', 'data', 'km_atual']).reset_index(drop=True)
 
-        # Calcular diferença de km para cada placa
+        # Diferença de km por veículo
         df['km_diff'] = df.groupby('placa')['km_atual'].diff()
 
-        # Calcular consumo por km
+        # Consumo por km
         df['consumo_por_km'] = df['litros'] / df['km_diff']
 
-        # Filtrar dados válidos
+        # Limpar dados inválidos
         df_clean = df.dropna(subset=['km_diff', 'consumo_por_km'])
         df_clean = df_clean[df_clean['km_diff'] > 0]
 
@@ -70,4 +74,4 @@ if uploaded_file:
     except Exception as e:
         st.error(f'Erro ao processar o arquivo: {e}')
 else:
-    st.info('Por favor, faça upload do arquivo Excel com as abas "Abastecimento Externo" e "Abastecimento Interno".')
+    st.info('Por favor, faça upload do arquivo Excel com as abas "Abastecimento Interno" e "Abastecimento Externo".')
