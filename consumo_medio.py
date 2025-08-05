@@ -3,14 +3,12 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 
-# Função para carregar e preparar os dados
 @st.cache_data
 def carregar_dados(uploaded_file):
     try:
         interno = pd.read_excel(uploaded_file, sheet_name='Abastecimento Interno')
         externo = pd.read_excel(uploaded_file, sheet_name='Abastecimento Externo')
 
-        # Padronizar - Abastecimento Interno
         interno = interno.rename(columns={
             'Data': 'data',
             'Placa': 'placa',
@@ -23,11 +21,8 @@ def carregar_dados(uploaded_file):
         interno['litros'] = pd.to_numeric(interno['litros'], errors='coerce')
         interno['km_atual'] = pd.to_numeric(interno['km_atual'], errors='coerce')
         interno['tipo'] = interno['tipo'].astype(str).str.lower()
-
-        # Filtrar apenas saídas no interno
         interno = interno[interno['tipo'] == 'saída']
 
-        # Padronizar - Abastecimento Externo
         externo = externo.rename(columns={
             'Data': 'data',
             'Placa': 'placa',
@@ -40,24 +35,16 @@ def carregar_dados(uploaded_file):
         externo['km_atual'] = pd.to_numeric(externo['km_atual'], errors='coerce')
         externo['tipo'] = 'externo'
 
-        # Marcar tipo interno
         interno['tipo'] = 'interno'
 
-        # Concatenar dataframes
         df = pd.concat([interno, externo], ignore_index=True)
-
-        # Ordenar e calcular diferença de km
         df = df.sort_values(['placa', 'data', 'km_atual']).reset_index(drop=True)
         df['km_diff'] = df.groupby('placa')['km_atual'].diff()
         df['consumo_por_km'] = df['litros'] / df['km_diff']
         df['km_por_litro'] = 1 / df['consumo_por_km']
-
-        # Remover registros inválidos
         df = df.dropna(subset=['km_diff', 'consumo_por_km'])
-        df = df[df['km_diff'] > 0]
-
+        df = df[df['km_diff'] > 10]  # filtra trechos menores que 10 km para evitar ruído
         return df
-
     except Exception as e:
         st.error(f'Erro ao carregar/processar os dados: {e}')
         return pd.DataFrame()
@@ -107,6 +94,23 @@ def grafico_tendencia(df, placa):
     fig.update_layout(yaxis_title='Km por Litro', xaxis_title='Mês')
     return fig
 
+def validar_consumo(df, consumo_esperado_por_veiculo, tolerancia=0.3):
+    resultados = []
+    for placa, esperado in consumo_esperado_por_veiculo.items():
+        df_veiculo = df[df['placa'] == placa]
+        litros = df_veiculo['litros'].sum()
+        km = df_veiculo['km_diff'].sum()
+        if km == 0 or litros == 0:
+            resultados.append((placa, np.nan, 'Sem dados suficientes'))
+            continue
+        consumo_calc = litros / km  # litros por km
+        desvio = abs(consumo_calc - esperado) / esperado
+        status = 'OK' if desvio <= tolerancia else 'Fora da margem'
+        resultados.append((placa, consumo_calc, status))
+    df_result = pd.DataFrame(resultados, columns=['placa', 'consumo_calculado_L_km', 'status'])
+    df_result['km_por_litro'] = 1 / df_result['consumo_calculado_L_km']
+    return df_result
+
 def main():
     st.set_page_config(page_title='Dashboard Consumo Médio - Frota', layout='wide')
     st.title('🚛 Dashboard de Consumo Médio da Frota')
@@ -121,7 +125,6 @@ def main():
         st.warning('Nenhum dado válido após o processamento.')
         return
 
-    # Sidebar filtros
     st.sidebar.header('Filtros')
     placas = sorted(df['placa'].unique())
     placas_selecionadas = st.sidebar.multiselect('Selecione veículos:', placas, default=placas)
@@ -130,7 +133,6 @@ def main():
     data_max = df['data'].max()
     periodo = st.sidebar.date_input('Período:', [data_min, data_max], min_value=data_min, max_value=data_max)
 
-    # Filtrar dataframe
     df_filtrado = df[
         (df['placa'].isin(placas_selecionadas)) &
         (df['data'] >= pd.to_datetime(periodo[0])) &
@@ -140,8 +142,18 @@ def main():
     metricas = calcular_metricas(df_filtrado)
     df_consumo = consumo_medio_por_veiculo(df_filtrado)
 
-    # Criar abas
-    aba_geral, aba_veiculos, aba_tendencias = st.tabs(['📊 Visão Geral', '🚗 Detalhes por Veículo', '📈 Tendências'])
+    # Exemplo: defina seus consumos esperados em L/km para cada placa abaixo
+    consumo_esperado_por_veiculo = {
+        # 'ABC1234': 0.20, # 5 km/l
+        # 'XYZ5678': 0.15, # 6.66 km/l
+        # Coloque aqui as placas reais da frota e seus valores de consumo esperado
+    }
+
+    df_validacao = validar_consumo(df_filtrado, consumo_esperado_por_veiculo, tolerancia=0.3)
+
+    aba_geral, aba_veiculos, aba_tendencias, aba_validacao = st.tabs([
+        '📊 Visão Geral', '🚗 Detalhes por Veículo', '📈 Tendências', '🔍 Validação Consumo'
+    ])
 
     with aba_geral:
         st.header('Visão Geral da Frota')
@@ -190,6 +202,30 @@ def main():
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info('Sem dados suficientes para gerar gráfico.')
+
+    with aba_validacao:
+        st.header('🔍 Validação do Consumo Médio por Veículo')
+        st.markdown('Veículos classificados como "Fora da margem" estão com consumo calculado fora do intervalo aceitável ±30% do esperado.')
+
+        if df_validacao.empty:
+            st.info('Nenhum consumo esperado configurado para validação. Atualize o dicionário `consumo_esperado_por_veiculo` no código.')
+        else:
+            fora_margem = df_validacao[df_validacao['status'] == 'Fora da margem']
+            ok = df_validacao[df_validacao['status'] == 'OK']
+
+            st.write(f'Veículos com consumo fora da margem: {fora_margem.shape[0]}')
+            st.write(f'Veículos dentro da margem: {ok.shape[0]}')
+
+            def color_row(row):
+                if row.status == 'Fora da margem':
+                    return ['background-color: #ff9999']*len(row)
+                else:
+                    return ['background-color: #b6fcd5']*len(row)
+
+            st.dataframe(df_validacao.style.apply(color_row, axis=1).format({
+                'consumo_calculado_L_km': '{:.3f}',
+                'km_por_litro': '{:.2f}'
+            }))
 
 if __name__ == '__main__':
     main()
